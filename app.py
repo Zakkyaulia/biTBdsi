@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import re
 import unicodedata
@@ -93,134 +94,436 @@ class StarSchema:
 
 
 st.set_page_config(
-    page_title="Dashboard BI Alumni DSI Unand",
-    page_icon="BI",
+    page_title="Lensa DSI",
+    page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+def get_base64_image(image_path: Path) -> str:
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode("utf-8")
 
 
 def inject_css() -> None:
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+
         :root {
-            --surface: #f7f8f4;
-            --panel: #eef2ea;
-            --ink: #25302a;
-            --muted: #67736b;
-            --accent: #246b55;
-            --accent-soft: #dce9df;
-            --line: #d8ded5;
-            --warn: #b56c23;
-            --danger: #ad3f43;
+            /* Palette */
+            --surface: #fcfbfa; /* Warm ivory/cream background */
+            --panel: #d6deda; /* Soft light sage green for sidebar */
+            --ink: #1c2826; /* Deep slate / charcoal */
+            --muted: #5e6b66; /* Elegant slate gray */
+            --accent: #1f644e; /* Dark premium forest/emerald green */
+            --accent-soft: #e2ede7; /* Soft light sage */
+            --line: #e3e6e0; /* Subtle warm border line */
+            --warn: #b87333; /* Copper / amber */
+            --danger: #c23b3f; /* Deep crimson */
+            
+            /* Sidebar-specific colors */
+            --sidebar-text: #1c2826; /* Dark text for light sidebar */
+            --sidebar-muted: #5e6b66;
         }
 
-        .stApp {
-            background: var(--surface);
-            color: var(--ink);
+        /* Typography & Globals */
+        html, body, .stApp {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--surface) !important;
+            color: var(--ink) !important;
         }
 
+        /* Hide all default children of the collapse/expand buttons to clean up ligatures/icons */
+        [data-testid="stSidebarCollapseButton"] *,
+        [data-testid="stSidebarCollapseButton"] button *,
+        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] *,
+        [data-testid="stHeader"] button[data-testid="stBaseButton-headerNoPadding"] *,
+        [data-testid="collapsedControl"] button *,
+        [data-testid="collapsedSidebar"] button *,
+        button[title="Collapse sidebar"] *,
+        button[title="Expand sidebar"] * {
+            display: none !important;
+        }
+
+        /* Styling the collapse button (inside the open sidebar) */
+        [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-headerNoPadding"],
+        button[title="Collapse sidebar"] {
+            background-color: #c9d5cf !important; /* Muted sage background */
+            border: 1px solid #b4c5be !important;
+            border-radius: 6px !important;
+            opacity: 1 !important;
+            width: 32px !important;
+            height: 32px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            position: relative !important;
+            transition: all 0.2s ease !important;
+            visibility: visible !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"]:hover,
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-headerNoPadding"]:hover,
+        button[title="Collapse sidebar"]:hover {
+            background-color: #b8c8c0 !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05) !important;
+        }
+
+        /* Styling the expand button (floating tab nempel di pojok kiri layar) when collapsed */
+        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"],
+        [data-testid="stHeader"] button[data-testid="stBaseButton-headerNoPadding"],
+        [data-testid="collapsedControl"],
+        [data-testid="collapsedControl"] button,
+        [data-testid="collapsedSidebar"] button,
+        button[title="Expand sidebar"] {
+            background-color: var(--accent) !important; /* Forest Green solid background */
+            border: none !important;
+            border-radius: 0 8px 8px 0 !important; /* Curved only on the right, flat on the left edge */
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.25) !important;
+            width: 24px !important;
+            height: 64px !important;
+            opacity: 1 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            position: fixed !important;
+            left: 0 !important;
+            top: 60px !important;
+            z-index: 999999 !important;
+            transition: all 0.2s ease !important;
+            visibility: visible !important;
+        }
+        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"]:hover,
+        [data-testid="stHeader"] button[data-testid="stBaseButton-headerNoPadding"]:hover,
+        [data-testid="collapsedControl"]:hover,
+        [data-testid="collapsedControl"] button:hover,
+        [data-testid="collapsedSidebar"] button:hover,
+        button[title="Expand sidebar"]:hover {
+            background-color: #24785e !important;
+            width: 30px !important; /* Sedikit pop-out ke kanan ketika di-hover */
+        }
+
+        /* Draw custom SVG double-arrow-left on the collapse button */
+        [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"]::before,
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-headerNoPadding"]::before,
+        button[title="Collapse sidebar"]::before {
+            content: "" !important;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            width: 16px !important;
+            height: 16px !important;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f644e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='11 17 6 12 11 7'/><polyline points='18 17 13 12 18 7'/></svg>") !important;
+            background-size: contain !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            display: block !important;
+        }
+
+        /* Draw custom SVG chevron-right on the expand button (panah kanan putih tunggal) */
+        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"]::before,
+        [data-testid="stHeader"] button[data-testid="stBaseButton-headerNoPadding"]::before,
+        [data-testid="collapsedControl"]::before,
+        [data-testid="collapsedControl"] button::before,
+        [data-testid="collapsedSidebar"] button::before,
+        button[title="Expand sidebar"]::before {
+            content: "" !important;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            width: 14px !important;
+            height: 14px !important;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='9 18 15 12 9 6'/></svg>") !important;
+            background-size: contain !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            display: block !important;
+        }
+
+        .main {
+            background-color: var(--surface) !important;
+        }
+
+        /* Sidebar Styling (Free to collapse naturally) */
         [data-testid="stSidebar"] {
-            background: var(--panel);
-            border-right: 1px solid var(--line);
+            background-color: var(--panel) !important;
+            border-right: 1px solid #b4c5be !important;
         }
 
+        /* High-contrast Sidebar Labels and Text */
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3,
+        [data-testid="stSidebar"] [data-testid="stHeader"] h1,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] span {
+            color: var(--sidebar-text) !important;
+            font-family: 'Outfit', sans-serif !important;
+        }
+
+        /* Sidebar Captions and Small Notes */
+        [data-testid="stSidebar"] .stCaption, 
+        [data-testid="stSidebar"] caption,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p code,
+        [data-testid="stSidebar"] .stSlider span {
+            color: var(--sidebar-muted) !important;
+        }
+
+        /* Multiselect Tags (Elegant Sage Green) */
+        div[data-baseweb="tag"], 
+        span[data-baseweb="tag"],
+        .stMultiSelect div[data-baseweb="tag"],
+        [data-testid="stSidebar"] .stMultiSelect span,
+        [data-testid="stSidebar"] div[data-baseweb="tag"] {
+            background-color: #ffffff !important; /* White tags for readability */
+            color: #1c2826 !important; /* Dark Green Text */
+            border: 1px solid #b4c5be !important;
+            border-radius: 6px !important;
+        }
+        div[data-baseweb="tag"] span,
+        div[data-baseweb="tag"] div,
+        [data-testid="stSidebar"] div[data-baseweb="tag"] span,
+        [data-testid="stSidebar"] div[data-baseweb="tag"] div {
+            color: #1c2826 !important;
+            font-weight: 500 !important;
+        }
+        div[data-baseweb="tag"] svg,
+        [data-testid="stSidebar"] div[data-baseweb="tag"] svg {
+            fill: #1c2826 !important;
+        }
+
+        /* Sliders in Sidebar */
+        [data-testid="stSidebar"] div[data-testid="stSlider"] > div > div {
+            background-color: #c2cbc7 !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stSlider"] div[data-testid="stThumbValue"] + div > div {
+            background-color: var(--accent) !important; /* Accent active track */
+        }
+        [data-testid="stSidebar"] div[data-testid="stSlider"] [role="slider"] {
+            background-color: var(--accent) !important; /* Accent slider handle */
+            border: 2px solid #ffffff !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stThumbValue"] {
+            color: var(--sidebar-text) !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-weight: 600 !important;
+        }
+
+        /* Dropdowns in Sidebar */
+        [data-testid="stSidebar"] [data-baseweb="select"] > div {
+            background-color: #ffffff !important;
+            color: var(--sidebar-text) !important;
+            border: 1px solid #b4c5be !important;
+        }
+
+        /* Refresh Button in Sidebar (Sage Green Style) */
+        [data-testid="stSidebar"] button[kind="secondary"] {
+            background-color: var(--accent) !important;
+            color: #ffffff !important;
+            border: 1px solid var(--accent) !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            transition: all 0.2s ease !important;
+            width: 100% !important;
+            padding: 0.5rem !important;
+        }
+        [data-testid="stSidebar"] button[kind="secondary"]:hover {
+            background-color: #24785e !important;
+            border-color: #24785e !important;
+            box-shadow: 0 4px 10px rgba(31, 100, 78, 0.2) !important;
+            transform: translateY(-1px) !important;
+        }
+        [data-testid="stSidebar"] button[kind="secondary"]:active {
+            transform: translateY(1px) !important;
+        }
+
+        /* Main Page Layout Details */
         .block-container {
-            padding-top: 1.4rem;
-            padding-bottom: 2.5rem;
+            padding-top: 1.5rem;
+            padding-bottom: 3rem;
             max-width: 1420px;
         }
 
-        h1, h2, h3 {
-            letter-spacing: 0;
-            color: var(--ink);
+        [data-testid="stHeader"] {
+            background-color: rgba(252, 251, 250, 0.8) !important;
+            backdrop-filter: blur(8px) !important;
+        }
+
+        /* Titles and Headings */
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Outfit', sans-serif !important;
+            color: var(--ink) !important;
         }
 
         h1 {
-            font-size: 2rem;
-            font-weight: 740;
-            margin-bottom: .2rem;
+            font-size: 2.3rem !important;
+            font-weight: 800 !important;
+            background: linear-gradient(135deg, #11221c, #1f644e);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.4rem !important;
         }
 
         h2 {
-            font-size: 1.35rem;
-            font-weight: 700;
-            margin-top: 1rem;
+            font-size: 1.45rem !important;
+            font-weight: 700 !important;
+            margin-top: 1.5rem !important;
+            border-bottom: 2px solid #eef1ed;
+            padding-bottom: 0.3rem !important;
         }
 
         h3 {
-            font-size: 1.05rem;
-            font-weight: 680;
+            font-size: 1.15rem !important;
+            font-weight: 680 !important;
+            margin-top: 1rem !important;
         }
 
+        /* KPI / Metric Cards (White, with Left Highlight Border) */
         [data-testid="stMetric"] {
-            background: #fbfcf8;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: .85rem 1rem;
-            box-shadow: 0 1px 2px rgba(37, 48, 42, .04);
+            background-color: #ffffff !important;
+            border: 1px solid #eef1ed !important;
+            border-left: 5px solid var(--accent) !important;
+            border-radius: 12px !important;
+            padding: 0.95rem 1.25rem !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.01) !important;
+            transition: all 0.2s ease-in-out !important;
+        }
+        [data-testid="stMetric"]:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.01) !important;
         }
 
         [data-testid="stMetricLabel"] {
-            color: var(--muted);
+            color: var(--muted) !important;
+            font-size: 0.88rem !important;
+            font-weight: 500 !important;
         }
 
         [data-testid="stMetricValue"] {
-            color: var(--ink);
-            font-size: 1.55rem;
-            font-weight: 760;
+            color: var(--ink) !important;
+            font-size: 1.7rem !important;
+            font-weight: 800 !important;
+            margin-top: 0.15rem !important;
         }
 
+        /* Tabs Selection Bar */
+        div[data-testid="stTabs"] {
+            border-bottom: 2px solid #eef1ed !important;
+            margin-bottom: 1.5rem !important;
+        }
         div[data-testid="stTabs"] button {
-            min-height: 42px;
+            background-color: transparent !important;
+            border: none !important;
+            padding: 0.75rem 1.5rem !important;
+            margin-right: 0.5rem !important;
+            transition: all 0.2s ease !important;
         }
-
+        div[data-testid="stTabs"] button p {
+            font-size: 1rem !important;
+            font-weight: 600 !important;
+            color: var(--muted) !important;
+            transition: color 0.2s ease !important;
+        }
+        div[data-testid="stTabs"] button:hover p {
+            color: var(--accent) !important;
+        }
         div[data-testid="stTabs"] button[aria-selected="true"] {
-            border-bottom-color: var(--accent);
-            color: var(--accent);
+            border-bottom: 3px solid var(--accent) !important;
+        }
+        div[data-testid="stTabs"] button[aria-selected="true"] p {
+            color: var(--accent) !important;
+            font-weight: 700 !important;
         }
 
+        /* Notes & Subtitles */
         .section-note {
-            color: var(--muted);
-            font-size: .93rem;
-            line-height: 1.5;
-            margin: -.25rem 0 .75rem 0;
+            color: var(--muted) !important;
+            font-size: 0.95rem !important;
+            line-height: 1.6 !important;
+            margin-top: -0.5rem !important;
+            margin-bottom: 1.25rem !important;
         }
 
+        /* Schema Box widgets (Star Schema tab) */
         .schema-box {
-            background: #fbfcf8;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 1rem;
-            min-height: 160px;
+            background-color: #ffffff !important;
+            border: 1px solid #eef1ed !important;
+            border-radius: 12px !important;
+            padding: 1.25rem !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02) !important;
+            min-height: 180px !important;
+            transition: all 0.2s ease !important;
+        }
+        .schema-box:hover {
+            box-shadow: 0 8px 12px -3px rgba(0, 0, 0, 0.03) !important;
+            border-color: var(--accent-soft) !important;
         }
 
         .schema-title {
-            color: var(--accent);
-            font-weight: 760;
-            margin-bottom: .45rem;
+            color: var(--accent) !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-weight: 700 !important;
+            font-size: 1.12rem !important;
+            margin-bottom: 0.5rem !important;
         }
 
         .schema-field {
-            color: var(--ink);
-            font-size: .9rem;
-            line-height: 1.55;
+            color: var(--ink) !important;
+            font-size: 0.88rem !important;
+            line-height: 1.55 !important;
         }
 
+        /* Custom Badges/Chips */
         .status-chip {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 999px;
-            padding: .18rem .55rem;
-            font-size: .82rem;
-            background: var(--accent-soft);
-            color: var(--accent);
-            border: 1px solid #c8d9cc;
+            display: inline-flex !important;
+            align-items: center !important;
+            border-radius: 6px !important;
+            padding: 0.25rem 0.75rem !important;
+            font-size: 0.82rem !important;
+            font-weight: 600 !important;
+            background-color: var(--accent-soft) !important;
+            color: var(--accent) !important;
+            border: 1px solid #c8d9cc !important;
+            margin-bottom: 1rem !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def style_plotly_fig(fig) -> None:
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="'Inter', sans-serif", color="#1c2826"),
+        title=dict(font=dict(family="'Outfit', sans-serif", size=15, color="#1c2826")),
+        margin=dict(t=55, b=30, l=10, r=10),
+    )
+    fig.update_xaxes(
+        showgrid=True, 
+        gridcolor="#eef1ec", 
+        linecolor="#d8ded5",
+        zeroline=False,
+        title_font=dict(family="'Inter', sans-serif", size=11, color="#5e6b66"),
+        tickfont=dict(family="'Inter', sans-serif", size=9, color="#5e6b66"),
+    )
+    fig.update_yaxes(
+        showgrid=True, 
+        gridcolor="#eef1ec", 
+        linecolor="#d8ded5",
+        zeroline=False,
+        title_font=dict(family="'Inter', sans-serif", size=11, color="#5e6b66"),
+        tickfont=dict(family="'Inter', sans-serif", size=9, color="#5e6b66"),
     )
 
 
@@ -401,7 +704,7 @@ def load_star_schema_from_db() -> StarSchema:
 
 
 def render_database_setup(error: Exception) -> None:
-    st.title("Dashboard BI Alumni DSI Unand")
+    st.title("Lensa DSI")
     st.error("Dashboard belum bisa membaca PostgreSQL star schema.")
     st.markdown(
         f"""
@@ -637,7 +940,9 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
     kpi_cols[4].metric("Tahun Terbaru", latest_year)
 
     if df.empty:
-        st.plotly_chart(plot_empty("Tidak ada data pada filter ini."), use_container_width=True)
+        fig_empty = plot_empty("Tidak ada data pada filter ini.")
+        style_plotly_fig(fig_empty)
+        st.plotly_chart(fig_empty, use_container_width=True)
         return
 
     yearly = (
@@ -663,8 +968,9 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
             title="Tren Jumlah Lulusan per Tahun",
             labels={"jumlah_lulusan": "Jumlah Lulusan", "Tahun Wisuda": "Tahun Wisuda"},
         )
-        fig.update_traces(line_color="#246b55", marker_size=8)
-        fig.update_layout(height=360, margin=dict(l=10, r=10, t=55, b=10))
+        fig.update_traces(line_color="#1f644e", marker_size=8)
+        style_plotly_fig(fig)
+        fig.update_layout(height=360)
         st.plotly_chart(fig, use_container_width=True)
 
     with col_right:
@@ -674,9 +980,10 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
             y="Jumlah",
             title="Distribusi Rentang IPK",
             color="Rentang IPK",
-            color_discrete_sequence=["#6f8f72", "#246b55", "#5b7894", "#a88349", "#ad6b6e"],
+            color_discrete_sequence=["#5b7894", "#1f644e", "#88a299", "#b87333", "#c23b3f"],
         )
-        fig.update_layout(height=360, showlegend=False, margin=dict(l=10, r=10, t=55, b=10))
+        style_plotly_fig(fig)
+        fig.update_layout(height=360, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
     col_left, col_right = st.columns([1.1, 1])
@@ -688,9 +995,10 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
             color="rata_ipk",
             title="Lulusan per Periode Wisuda",
             labels={"label": "Periode", "jumlah_lulusan": "Jumlah", "rata_ipk": "Rata-rata IPK"},
-            color_continuous_scale=["#e6e2cc", "#5f8b6b", "#245c56"],
+            color_continuous_scale=["#e2ede7", "#5f8b6b", "#1f644e"],
         )
-        fig.update_layout(height=390, margin=dict(l=10, r=10, t=55, b=95), xaxis_tickangle=-45)
+        style_plotly_fig(fig)
+        fig.update_layout(height=390, xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
     with col_right:
@@ -702,9 +1010,10 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
             values="Jumlah",
             title="Komposisi Lama Studi",
             hole=.48,
-            color_discrete_sequence=["#246b55", "#b7a05a", "#c47c43", "#ad3f43"],
+            color_discrete_sequence=["#1f644e", "#b87333", "#c47c43", "#c23b3f"],
         )
-        fig.update_layout(height=390, margin=dict(l=10, r=10, t=55, b=10))
+        style_plotly_fig(fig)
+        fig.update_layout(height=390)
         st.plotly_chart(fig, use_container_width=True)
 
     fig = px.scatter(
@@ -719,16 +1028,17 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
     )
     fig.update_traces(
         hovertemplate=(
-            "<b>%{customdata[0]}</b><br>"
-            "NIM: %{customdata[1]}<br>"
-            "Periode: %{customdata[2]} %{customdata[3]}<br>"
-            "Lama Studi: %{x} bulan<br>"
-            "IPK: %{y:.2f}<br>"
-            "Judul: %{customdata[4]}<extra></extra>"
+             "<b>%{customdata[0]}</b><br>"
+             "NIM: %{customdata[1]}<br>"
+             "Periode: %{customdata[2]} %{customdata[3]}<br>"
+             "Lama Studi: %{x} bulan<br>"
+             "IPK: %{y:.2f}<br>"
+             "Judul: %{customdata[4]}<extra></extra>"
         )
     )
-    fig.add_vline(x=target_months, line_dash="dash", line_color="#ad3f43", annotation_text=f"Target {target_months} bulan")
-    fig.update_layout(height=460, margin=dict(l=10, r=10, t=55, b=10))
+    fig.add_vline(x=target_months, line_dash="dash", line_color="#c23b3f", annotation_text=f"Target {target_months} bulan")
+    style_plotly_fig(fig)
+    fig.update_layout(height=460)
     st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Audit Data Alumni"):
@@ -798,9 +1108,10 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
             orientation="h",
             title="Top Dosen Berdasarkan Total Peran",
             labels={"jumlah_peran": "Jumlah Peran", "nama_dosen_normalized": "Dosen"},
-            color_discrete_sequence=["#246b55"],
+            color_discrete_sequence=["#1f644e"],
         )
-        fig.update_layout(height=520, margin=dict(l=10, r=10, t=55, b=10))
+        style_plotly_fig(fig)
+        fig.update_layout(height=520)
         st.plotly_chart(fig, use_container_width=True)
 
     with col_right:
@@ -812,9 +1123,10 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
             orientation="h",
             title="Komposisi Peran Pembimbing dan Penguji",
             labels={"jumlah": "Jumlah", "nama_dosen_normalized": "Dosen"},
-            color_discrete_map={"Pembimbing": "#246b55", "Penguji": "#a88349"},
+            color_discrete_map={"Pembimbing": "#1f644e", "Penguji": "#b87333"},
         )
-        fig.update_layout(height=520, margin=dict(l=10, r=10, t=55, b=10), yaxis={"categoryorder": "total ascending"})
+        style_plotly_fig(fig)
+        fig.update_layout(height=520, yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig, use_container_width=True)
 
     st.dataframe(
@@ -877,7 +1189,7 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
             orientation="h",
             title="Top Dosen Berdasarkan Total Relasi Peran",
             labels={"jumlah": "Jumlah Peran", "nama_dosen_normalized": "Dosen", "jenis_peran": "Jenis Peran"},
-            color_discrete_map={"Pembimbing": "#246b55", "Penguji": "#a88349"},
+            color_discrete_map={"Pembimbing": "#1f644e", "Penguji": "#d4a373"},
         )
         fig.update_layout(
             height=520,
@@ -895,7 +1207,7 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
             orientation="h",
             title="Perbandingan Total Peran vs Alumni Unik",
             labels={"value": "Jumlah", "nama_dosen_normalized": "Dosen", "variable": "Metrik"},
-            color_discrete_sequence=["#246b55", "#5b7894"],
+            color_discrete_sequence=["#1f644e", "#5b7894"],
         )
         fig.update_layout(height=520, margin=dict(l=10, r=10, t=55, b=10), yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig, use_container_width=True)
@@ -978,11 +1290,12 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
         heatmap_matrix,
         zmin=0,
         zmax=1,
-        color_continuous_scale=["#f3f1e7", "#c9d9c8", "#6b9a7b", "#ad3f43"],
+        color_continuous_scale=["#fcfbfa", "#c9d9c8", "#6b9a7b", "#c23b3f"],
         title="Heatmap NLP dari dim_tugas_akhir: Judul dan Judul Termirip",
         labels={"x": "Judul Termirip", "y": "Judul TA", "color": "Skor"},
         aspect="auto",
     )
+    style_plotly_fig(fig)
     fig.update_layout(height=620, margin=dict(l=10, r=10, t=60, b=145), xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
@@ -996,14 +1309,15 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
             title="Distribusi Skor SBERT Cosine Similarity Tertinggi",
             labels={"skor_kemiripan_tertinggi": "Skor Cosine Similarity", "count": "Jumlah Judul"},
             color_discrete_map={
-                "Unik": "#246b55",
-                "Agak Unik / Perlu Review": "#b56c23",
-                "Tidak Unik": "#ad3f43",
+                "Unik": "#1f644e",
+                "Agak Unik / Perlu Review": "#b87333",
+                "Tidak Unik": "#c23b3f",
             },
         )
-        fig.add_vline(x=0.70, line_dash="dash", line_color="#b56c23", annotation_text="Review 0.70")
-        fig.add_vline(x=0.85, line_dash="dash", line_color="#ad3f43", annotation_text="Tidak unik 0.85")
-        fig.update_layout(height=410, margin=dict(l=10, r=10, t=55, b=10))
+        fig.add_vline(x=0.70, line_dash="dash", line_color="#b87333", annotation_text="Review 0.70")
+        fig.add_vline(x=0.85, line_dash="dash", line_color="#c23b3f", annotation_text="Tidak unik 0.85")
+        style_plotly_fig(fig)
+        fig.update_layout(height=410)
         st.plotly_chart(fig, use_container_width=True)
 
     with col_right:
@@ -1015,24 +1329,27 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
                 title={"text": "Indeks Keunikan Dataset TA"},
                 gauge={
                     "axis": {"range": [0, 100]},
-                    "bar": {"color": "#246b55"},
+                    "bar": {"color": "#1f644e"},
                     "steps": [
                         {"range": [0, 40], "color": "#efd2cf"},
                         {"range": [40, 70], "color": "#eee0b6"},
                         {"range": [70, 100], "color": "#d8e6d5"},
                     ],
-                    "threshold": {"line": {"color": "#ad3f43", "width": 4}, "value": uniqueness_index},
+                    "threshold": {"line": {"color": "#c23b3f", "width": 4}, "value": uniqueness_index},
                 },
             )
         )
-        fig.update_layout(height=410, margin=dict(l=10, r=10, t=55, b=10))
+        style_plotly_fig(fig)
+        fig.update_layout(height=410)
         st.plotly_chart(fig, use_container_width=True)
 
     col_left, col_right = st.columns([1.1, 1])
     with col_left:
         scatter_df = df_nlp.dropna(subset=["pca_x", "pca_y"]).copy()
         if scatter_df.empty:
-            st.plotly_chart(plot_empty("Koordinat PCA belum tersedia di dim_tugas_akhir."), use_container_width=True)
+            fig_empty = plot_empty("Koordinat PCA belum tersedia di dim_tugas_akhir.")
+            style_plotly_fig(fig_empty)
+            st.plotly_chart(fig_empty, use_container_width=True)
         else:
             fig = px.scatter(
                 scatter_df,
@@ -1042,12 +1359,13 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
                 hover_data=["Nama", "Judul Tugas Akhir", "skor_kemiripan_tertinggi", "judul_termirip"],
                 title="Peta Kedekatan Judul TA dari Koordinat PCA SBERT",
                 color_discrete_map={
-                    "Unik": "#246b55",
-                    "Agak Unik / Perlu Review": "#b56c23",
-                    "Tidak Unik": "#ad3f43",
+                    "Unik": "#1f644e",
+                    "Agak Unik / Perlu Review": "#b87333",
+                    "Tidak Unik": "#c23b3f",
                 },
             )
-            fig.update_layout(height=460, margin=dict(l=10, r=10, t=55, b=10))
+            style_plotly_fig(fig)
+            fig.update_layout(height=460)
             st.plotly_chart(fig, use_container_width=True)
 
     with col_right:
@@ -1060,7 +1378,8 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
             title="Kata Kunci Dominan Setelah Stopword Removal",
             color_discrete_sequence=["#5b7894"],
         )
-        fig.update_layout(height=460, margin=dict(l=10, r=10, t=55, b=10))
+        style_plotly_fig(fig)
+        fig.update_layout(height=460)
         st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Top Judul Paling Mirip Berdasarkan dim_tugas_akhir")
@@ -1192,13 +1511,17 @@ def data_quality_dashboard(df: pd.DataFrame, schema: StarSchema, source_label: s
 def render_header(df: pd.DataFrame) -> None:
     min_year = int(df["Tahun Wisuda"].min())
     max_year = int(df["Tahun Wisuda"].max())
-    st.title("Dashboard BI Alumni DSI Unand")
+    st.title("Lensa DSI")
     st.markdown(
         f"""
-        <p class="section-note">
-        Data mart akademik alumni Departemen Sistem Informasi Universitas Andalas, rentang wisuda {min_year}-{max_year},
-        dengan tambahan analisis NLP similarity judul tugas akhir.
-        </p>
+        <div style="margin-top: -0.8rem; margin-bottom: 1.5rem;">
+            <div style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; font-weight: 600; color: #1f644e; line-height: 1.2;">
+                Learning, Evaluation & Analytics System
+            </div>
+            <div style="font-size: 0.95rem; color: #5e6b66; margin-top: 0.25rem;">
+                Departemen Sistem Informasi Universitas Andalas — Data Mart Akademik Alumni (Wisuda {min_year}-{max_year})
+            </div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -1206,6 +1529,43 @@ def render_header(df: pd.DataFrame) -> None:
 
 def main() -> None:
     inject_css()
+
+    # Render Logo and Brand in Sidebar (Compact, Premium Front-end Layout)
+    logo_path = Path("img/unandlogo.png")
+    if logo_path.exists():
+        try:
+            logo_base64 = get_base64_image(logo_path)
+            st.sidebar.markdown(
+                f"""
+                <div style="display: flex; align-items: center; gap: 12px; height: 36px; margin-bottom: 1.2rem;">
+                    <img src="data:image/png;base64,{logo_base64}" style="height: 34px; width: auto; object-fit: contain;" />
+                    <span style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 800; color: #1f644e; letter-spacing: 0.5px; white-space: nowrap;">LENSA DSI</span>
+                </div>
+                <div style="margin-top: -10px; margin-bottom: 1.5rem; border-bottom: 1px solid #b4c5be;"></div>
+                """,
+                unsafe_allow_html=True
+            )
+        except Exception:
+            # Fallback in case base64 reading encounters issues
+            st.sidebar.markdown(
+                """
+                <div style="display: flex; align-items: center; height: 36px; margin-bottom: 1.2rem;">
+                    <span style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 800; color: #1f644e; letter-spacing: 0.5px; white-space: nowrap;">LENSA DSI</span>
+                </div>
+                <div style="margin-top: -10px; margin-bottom: 1.5rem; border-bottom: 1px solid #b4c5be;"></div>
+                """,
+                unsafe_allow_html=True
+            )
+    else:
+        st.sidebar.markdown(
+            """
+            <div style="display: flex; align-items: center; height: 36px; margin-bottom: 1.2rem;">
+                <span style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 800; color: #1f644e; letter-spacing: 0.5px; white-space: nowrap;">LENSA DSI</span>
+            </div>
+            <div style="margin-top: -10px; margin-bottom: 1.5rem; border-bottom: 1px solid #b4c5be;"></div>
+            """,
+            unsafe_allow_html=True
+        )
 
     st.sidebar.header("Database")
     if st.sidebar.button("Refresh data dari PostgreSQL"):
@@ -1241,7 +1601,7 @@ def main() -> None:
     filtered = filter_dataframe(df, years, selected_periode, ipk_range)
     filtered_roles = filter_roles_dataframe(role_df, years, selected_periode, ipk_range)
 
-    tabs = st.tabs(["Akademik", "Dosen", "NLP Tugas Akhir", "Star Schema", "Kualitas Data"])
+    tabs = st.tabs(["Akademik", "Dosen", "Kemiripan Tugas Akhir", "Star Schema", "Kualitas Data"])
     with tabs[0]:
         academic_dashboard(filtered, target_months)
     with tabs[1]:

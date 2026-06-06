@@ -5,3 +5,5 @@ plotly>=5.22
 scikit-learn>=1.4
 sentence-transformers>=3.0
 psycopg[binary]>=3.2
+python-dotenv>=1.0.0
+

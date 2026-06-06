@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import datetime
 import os
 import re
 import unicodedata
@@ -14,6 +15,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import psycopg
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -120,12 +124,12 @@ def inject_css() -> None:
             --muted: #5e6b66; /* Elegant slate gray */
             --accent: #1f644e; /* Dark premium forest/emerald green */
             --accent-soft: #e2ede7; /* Soft light sage */
-            --line: #e3e6e0; /* Subtle warm border line */
+            --line: #b4c5be; /* Subtle warm border line matching sage */
             --warn: #b87333; /* Copper / amber */
             --danger: #c23b3f; /* Deep crimson */
             
             /* Sidebar-specific colors */
-            --sidebar-text: #1c2826; /* Dark text for light sidebar */
+            --sidebar-text: #1c2826;
             --sidebar-muted: #5e6b66;
         }
 
@@ -136,7 +140,7 @@ def inject_css() -> None:
             color: var(--ink) !important;
         }
 
-        /* Hide all default children of the collapse/expand buttons to clean up ligatures/icons */
+        /* Hide default Streamlit sidebar headers, collapse buttons, etc. if needed */
         [data-testid="stSidebarCollapseButton"] *,
         [data-testid="stSidebarCollapseButton"] button *,
         [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] *,
@@ -152,7 +156,7 @@ def inject_css() -> None:
         [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
         [data-testid="stSidebar"] button[data-testid="stBaseButton-headerNoPadding"],
         button[title="Collapse sidebar"] {
-            background-color: #c9d5cf !important; /* Muted sage background */
+            background-color: #c9d5cf !important;
             border: 1px solid #b4c5be !important;
             border-radius: 6px !important;
             opacity: 1 !important;
@@ -172,17 +176,17 @@ def inject_css() -> None:
             box-shadow: 0 2px 5px rgba(0,0,0,0.05) !important;
         }
 
-        /* Styling the expand button (floating tab nempel di pojok kiri layar) when collapsed */
+        /* Styling the expand button when collapsed */
         [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"],
         [data-testid="stHeader"] button[data-testid="stBaseButton-headerNoPadding"],
         [data-testid="collapsedControl"],
         [data-testid="collapsedControl"] button,
         [data-testid="collapsedSidebar"] button,
         button[title="Expand sidebar"] {
-            background-color: var(--accent) !important; /* Forest Green solid background */
+            background-color: var(--accent) !important;
             border: none !important;
-            border-radius: 0 8px 8px 0 !important; /* Curved only on the right, flat on the left edge */
-            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.25) !important;
+            border-radius: 0 8px 8px 0 !important;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15) !important;
             width: 24px !important;
             height: 64px !important;
             opacity: 1 !important;
@@ -204,8 +208,8 @@ def inject_css() -> None:
         [data-testid="collapsedControl"] button:hover,
         [data-testid="collapsedSidebar"] button:hover,
         button[title="Expand sidebar"]:hover {
-            background-color: #24785e !important;
-            width: 30px !important; /* Sedikit pop-out ke kanan ketika di-hover */
+            background-color: #1b5e43 !important;
+            width: 30px !important;
         }
 
         /* Draw custom SVG double-arrow-left on the collapse button */
@@ -219,14 +223,14 @@ def inject_css() -> None:
             transform: translate(-50%, -50%) !important;
             width: 16px !important;
             height: 16px !important;
-            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f644e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='11 17 6 12 11 7'/><polyline points='18 17 13 12 18 7'/></svg>") !important;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23114b36' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='11 17 6 12 11 7'/><polyline points='18 17 13 12 18 7'/></svg>") !important;
             background-size: contain !important;
             background-repeat: no-repeat !important;
             background-position: center !important;
             display: block !important;
         }
 
-        /* Draw custom SVG chevron-right on the expand button (panah kanan putih tunggal) */
+        /* Draw custom SVG chevron-right on the expand button */
         [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"]::before,
         [data-testid="stHeader"] button[data-testid="stBaseButton-headerNoPadding"]::before,
         [data-testid="collapsedControl"]::before,
@@ -251,99 +255,340 @@ def inject_css() -> None:
             background-color: var(--surface) !important;
         }
 
-        /* Sidebar Styling (Free to collapse naturally) */
+        /* Sidebar Styling */
         [data-testid="stSidebar"] {
             background-color: var(--panel) !important;
             border-right: 1px solid #b4c5be !important;
         }
 
-        /* High-contrast Sidebar Labels and Text */
-        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3,
-        [data-testid="stSidebar"] [data-testid="stHeader"] h1,
-        [data-testid="stSidebar"] label,
-        [data-testid="stSidebar"] span {
-            color: var(--sidebar-text) !important;
+        /* Typography & Layout for Sidebar Custom Brand elements */
+        .sidebar-brand-container {
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            margin-bottom: 6px !important;
+            margin-right: 48px !important; /* Prevent overlap with collapse control */
             font-family: 'Outfit', sans-serif !important;
         }
+        .logo-box {
+            background: linear-gradient(135deg, #114b36, #0b3626) !important;
+            border-radius: 12px !important;
+            padding: 8px !important;
+            width: 44px !important;
+            height: 44px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-shadow: 0 4px 10px rgba(17, 75, 54, 0.15) !important;
+        }
+        .logo-cap {
+            width: 24px !important;
+            height: 24px !important;
+        }
+        .brand-logo-img {
+            height: 38px !important;
+            width: auto !important;
+            object-fit: contain !important;
+        }
+        .brand-text {
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        .brand-title {
+            font-size: 1.35rem !important;
+            font-weight: 800 !important;
+            color: #1c2826 !important;
+            letter-spacing: 0.5px !important;
+            line-height: 1.1 !important;
+        }
+        .brand-subtitle {
+            font-size: 0.8rem !important;
+            color: #5e6b66 !important;
+            font-weight: 500 !important;
+        }
+        .brand-org {
+            font-size: 0.85rem !important;
+            color: #5e6b66 !important;
+            margin-left: 2px !important;
+            margin-bottom: 16px !important;
+            font-family: 'Inter', sans-serif !important;
+        }
+        .brand-divider {
+            margin-top: -8px !important;
+            margin-bottom: 24px !important;
+            border-bottom: 1px solid #b4c5be !important;
+        }
 
-        /* Sidebar Captions and Small Notes */
-        [data-testid="stSidebar"] .stCaption, 
-        [data-testid="stSidebar"] caption,
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p code,
+        /* Style the Data Source container in the sidebar specifically */
+        [data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
+            background-color: #ffffff !important;
+            border: 1px solid #b4c5be !important; /* Sage-colored border */
+            border-radius: 16px !important;
+            padding: 16px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02) !important;
+            margin-bottom: 16px !important;
+        }
+        .card-header {
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            margin-bottom: 12px !important;
+        }
+        .db-icon {
+            stroke: #114b36 !important;
+        }
+        .card-title {
+            font-family: 'Outfit', sans-serif !important;
+            font-weight: 700 !important;
+            font-size: 1.05rem !important;
+            color: #1c2826 !important;
+        }
+        .card-row {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            margin-bottom: 8px !important;
+        }
+        .card-row-stack {
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 4px !important;
+            margin-bottom: 8px !important;
+        }
+        .row-label {
+            font-size: 0.88rem !important;
+            color: #5e6b66 !important;
+            font-weight: 500 !important;
+        }
+        .status-badge {
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            background-color: #e8f5e9 !important;
+            color: #0f975a !important;
+            padding: 4px 12px !important;
+            border-radius: 20px !important;
+            font-size: 0.8rem !important;
+            font-weight: 600 !important;
+        }
+        .status-badge .dot {
+            width: 8px !important;
+            height: 8px !important;
+            background-color: #0f975a !important;
+            border-radius: 50% !important;
+            display: inline-block !important;
+        }
+        .update-time {
+            font-size: 0.95rem !important;
+            font-weight: 700 !important;
+            color: #1c2826 !important;
+        }
+
+        /* Style the Sync Data button inside the card container specifically */
+        [data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] button {
+            background-color: #114b36 !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 24px !important;
+            font-weight: 600 !important;
+            font-size: 0.9rem !important;
+            padding: 0.6rem 1.2rem !important;
+            width: 100% !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 8px !important;
+            box-shadow: 0 4px 6px rgba(17, 75, 54, 0.1) !important;
+            transition: all 0.2s ease !important;
+            margin: 12px 0 0 0 !important; /* No negative margins! */
+        }
+        [data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] button:hover {
+            background-color: #0b3626 !important;
+            box-shadow: 0 6px 12px rgba(17, 75, 54, 0.25) !important;
+            transform: translateY(-1px) !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] button:active {
+            transform: translateY(1px) !important;
+        }
+
+        /* Custom Sidebar filter title */
+        .filter-title {
+            font-family: 'Outfit', sans-serif !important;
+            font-weight: 700 !important;
+            font-size: 1.1rem !important;
+            color: #1c2826 !important;
+            margin-top: 10px !important;
+            margin-bottom: 12px !important;
+        }
+
+        /* Custom Expander Dropdowns in Sidebar */
+        [data-testid="stSidebar"] [data-testid="stExpander"] {
+            border: 1px solid #b4c5be !important; /* Sage border */
+            border-radius: 12px !important;
+            background-color: #ffffff !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.01) !important;
+            margin-bottom: 10px !important;
+            overflow: hidden !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] details {
+            border: none !important;
+            background-color: transparent !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+            font-family: 'Inter', sans-serif !important;
+            font-weight: 600 !important;
+            color: #1c2826 !important;
+            background-color: transparent !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
+            color: var(--accent) !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+            background-color: transparent !important;
+            border-top: 1px solid #eef1ed !important;
+        }
+        .expander-subtitle {
+            font-size: 0.8rem !important;
+            color: #5e6b66 !important;
+            font-weight: 600 !important;
+            margin-bottom: 6px !important;
+        }
+        .expander-note {
+            font-size: 0.78rem !important;
+            color: #5e6b66 !important;
+            margin-top: 8px !important;
+        }
+
+        /* Text and Inputs in Sidebar */
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+        [data-testid="stSidebar"] label {
+            color: var(--sidebar-text) !important;
+            font-family: 'Inter', sans-serif !important;
+        }
         [data-testid="stSidebar"] .stSlider span {
             color: var(--sidebar-muted) !important;
         }
 
-        /* Multiselect Tags (Elegant Sage Green) */
+        /* Multiselect Tags in Sidebar */
         div[data-baseweb="tag"], 
         span[data-baseweb="tag"],
         .stMultiSelect div[data-baseweb="tag"],
         [data-testid="stSidebar"] .stMultiSelect span,
         [data-testid="stSidebar"] div[data-baseweb="tag"] {
-            background-color: #ffffff !important; /* White tags for readability */
-            color: #1c2826 !important; /* Dark Green Text */
+            background-color: #f1f5f9 !important;
+            color: #1c2826 !important;
             border: 1px solid #b4c5be !important;
             border-radius: 6px !important;
         }
         div[data-baseweb="tag"] span,
-        div[data-baseweb="tag"] div,
-        [data-testid="stSidebar"] div[data-baseweb="tag"] span,
-        [data-testid="stSidebar"] div[data-baseweb="tag"] div {
+        [data-testid="stSidebar"] div[data-baseweb="tag"] span {
             color: #1c2826 !important;
             font-weight: 500 !important;
         }
-        div[data-baseweb="tag"] svg,
-        [data-testid="stSidebar"] div[data-baseweb="tag"] svg {
-            fill: #1c2826 !important;
-        }
-
+        
         /* Sliders in Sidebar */
         [data-testid="stSidebar"] div[data-testid="stSlider"] > div > div {
-            background-color: #c2cbc7 !important;
+            background-color: #b4c5be !important;
         }
         [data-testid="stSidebar"] div[data-testid="stSlider"] div[data-testid="stThumbValue"] + div > div {
-            background-color: var(--accent) !important; /* Accent active track */
+            background-color: var(--accent) !important;
         }
         [data-testid="stSidebar"] div[data-testid="stSlider"] [role="slider"] {
-            background-color: var(--accent) !important; /* Accent slider handle */
+            background-color: var(--accent) !important;
             border: 2px solid #ffffff !important;
         }
-        [data-testid="stSidebar"] div[data-testid="stThumbValue"] {
-            color: var(--sidebar-text) !important;
-            font-family: 'Outfit', sans-serif !important;
-            font-weight: 600 !important;
-        }
 
-        /* Dropdowns in Sidebar */
-        [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        /* 1. Semua Periode button styling */
+        div[data-testid="stSidebar"] button[key="btn_semua_periode"] {
             background-color: #ffffff !important;
-            color: var(--sidebar-text) !important;
-            border: 1px solid #b4c5be !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 20px !important;
+            color: #64748b !important;
+            font-weight: 600 !important;
+            text-align: left !important;
+            padding: 8px 16px !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+            margin-bottom: 12px !important;
         }
 
-        /* Refresh Button in Sidebar (Sage Green Style) */
-        [data-testid="stSidebar"] button[kind="secondary"] {
+        /* 2. Circle timeline container and labels */
+        .circle-label {
+            text-align: center !important;
+            font-size: 0.75rem !important;
+            font-weight: 600 !important;
+            color: #64748b !important;
+            margin-top: 4px !important;
+            margin-bottom: 12px !important;
+        }
+
+        /* Checkbox square button standard dimensions */
+        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button {
+            border-radius: 8px !important;
+            width: 44px !important;
+            height: 44px !important;
+            min-width: 44px !important;
+            max-width: 44px !important;
+            min-height: 44px !important;
+            max-height: 44px !important;
+            padding: 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-weight: 700 !important;
+            font-size: 1rem !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+            transition: all 0.2s ease !important;
+            background-color: #ffffff !important;
+            color: #475569 !important;
+            border: 1px solid #cbd5e1 !important;
+        }
+
+        /* Prevent Period Wisuda Roman numerals text from wrapping */
+        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button p {
+            white-space: nowrap !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        /* Style all main primary action buttons green */
+        .main [data-testid="stButton"] button,
+        .main div[data-testid="stFormSubmitButton"] button {
             background-color: var(--accent) !important;
             color: #ffffff !important;
-            border: 1px solid var(--accent) !important;
+            border: none !important;
             border-radius: 8px !important;
             font-weight: 600 !important;
+            font-size: 1rem !important;
+            padding: 8px 16px !important;
+            box-shadow: 0 4px 6px rgba(17, 75, 54, 0.15) !important;
             transition: all 0.2s ease !important;
             width: 100% !important;
-            padding: 0.5rem !important;
         }
-        [data-testid="stSidebar"] button[kind="secondary"]:hover {
-            background-color: #24785e !important;
-            border-color: #24785e !important;
-            box-shadow: 0 4px 10px rgba(31, 100, 78, 0.2) !important;
-            transform: translateY(-1px) !important;
+
+        .main [data-testid="stButton"] button:hover,
+        .main div[data-testid="stFormSubmitButton"] button:hover {
+            background-color: #0b3626 !important;
+            box-shadow: 0 6px 12px rgba(17, 75, 54, 0.25) !important;
         }
-        [data-testid="stSidebar"] button[kind="secondary"]:active {
-            transform: translateY(1px) !important;
+
+        /* Override: Hapus Semua Preview button (Column 1 of horizontal action block) */
+        .main div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) div[data-testid="stButton"] button {
+            background-color: #fee2e2 !important;
+            color: #dc2626 !important;
+            border: 1px solid #fca5a5 !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            font-size: 1rem !important;
+            padding: 8px 16px !important;
+            box-shadow: none !important;
+            transition: all 0.2s ease !important;
+        }
+        .main div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) div[data-testid="stButton"] button:hover {
+            background-color: #fca5a5 !important;
+            color: #b91c1c !important;
+            box-shadow: none !important;
         }
 
         /* Main Page Layout Details */
@@ -367,7 +612,7 @@ def inject_css() -> None:
         h1 {
             font-size: 2.3rem !important;
             font-weight: 800 !important;
-            background: linear-gradient(135deg, #11221c, #1f644e);
+            background: linear-gradient(135deg, #114b36, #0b3626);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 0.4rem !important;
@@ -381,41 +626,20 @@ def inject_css() -> None:
             padding-bottom: 0.3rem !important;
         }
 
-        h3 {
-            font-size: 1.15rem !important;
-            font-weight: 680 !important;
-            margin-top: 1rem !important;
-        }
-
-        /* KPI / Metric Cards (White, with Left Highlight Border) */
-        [data-testid="stMetric"] {
+        /* Premium card borders for st.container(border=True) */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
             background-color: #ffffff !important;
             border: 1px solid #eef1ed !important;
-            border-left: 5px solid var(--accent) !important;
-            border-radius: 12px !important;
-            padding: 0.95rem 1.25rem !important;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.01) !important;
+            border-radius: 16px !important;
+            padding: 20px !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02) !important;
             transition: all 0.2s ease-in-out !important;
         }
-        [data-testid="stMetric"]:hover {
-            transform: translateY(-2px) !important;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.01) !important;
+        div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04) !important;
+            border-color: #e2ede7 !important;
         }
-
-        [data-testid="stMetricLabel"] {
-            color: var(--muted) !important;
-            font-size: 0.88rem !important;
-            font-weight: 500 !important;
-        }
-
-        [data-testid="stMetricValue"] {
-            color: var(--ink) !important;
-            font-size: 1.7rem !important;
-            font-weight: 800 !important;
-            margin-top: 0.15rem !important;
-        }
-
-        /* Tabs Selection Bar */
+         /* Tabs Selection Bar */
         div[data-testid="stTabs"] {
             border-bottom: 2px solid #eef1ed !important;
             margin-bottom: 1.5rem !important;
@@ -443,8 +667,116 @@ def inject_css() -> None:
             color: var(--accent) !important;
             font-weight: 700 !important;
         }
+        
+        /* Overrides to prevent default Streamlit red/orange highlights on hover/active/focus */
+        div[data-testid="stTabs"] button[data-baseweb="tab"] {
+            border-bottom: 3px solid transparent !important;
+        }
+        div[data-testid="stTabs"] button[data-baseweb="tab"]:hover {
+            border-bottom: 3px solid var(--accent-soft) !important;
+        }
+        div[data-testid="stTabs"] button[aria-selected="true"] {
+            border-bottom: 3px solid var(--accent) !important;
+        }
+        div[data-testid="stTabs"] button[data-baseweb="tab"]:focus,
+        div[data-testid="stTabs"] button[data-baseweb="tab"]:active,
+        div[data-testid="stTabs"] button[data-baseweb="tab"] * {
+            outline: none !important;
+            box-shadow: none !important;
+        }
+        div[data-baseweb="tab-highlight"] {
+            background-color: var(--accent) !important;
+        }
 
-        /* Notes & Subtitles */
+        /* Custom HTML KPI Cards styling */
+        .kpi-row {
+            display: flex !important;
+            gap: 16px !important;
+            width: 100% !important;
+            margin-bottom: 24px !important;
+        }
+        
+        .kpi-card-custom {
+            flex: 1 !important;
+            background-color: #ffffff !important;
+            border: 1px solid #eef1ed !important;
+            border-radius: 16px !important;
+            padding: 16px 20px !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.01) !important;
+            transition: all 0.2s ease-in-out !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            min-height: 125px !important;
+            position: relative !important;
+        }
+        
+        .kpi-card-custom:hover {
+            transform: translateY(-3px) !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.01) !important;
+            border-color: #e2ede7 !important;
+        }
+        
+        .kpi-card-header {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-start !important;
+            width: 100% !important;
+        }
+        
+        .kpi-card-title {
+            color: #64748b !important;
+            font-size: 0.88rem !important;
+            font-weight: 600 !important;
+            font-family: 'Inter', sans-serif !important;
+        }
+        
+        .kpi-card-icon {
+            width: 36px !important;
+            height: 36px !important;
+            border-radius: 10px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        
+        /* Icon backgrounds and stroke colors */
+        .icon-alumni { background-color: #e8f5e9 !important; color: #114b36 !important; }
+        .icon-ipk { background-color: #e6f6f4 !important; color: #0d9488 !important; }
+        .icon-studi { background-color: #fffbeb !important; color: #d97706 !important; }
+        .icon-tepat { background-color: #fef2f2 !important; color: #dc2626 !important; }
+        .icon-tahun { background-color: #f0f9ff !important; color: #0284c7 !important; }
+        
+        .kpi-card-value {
+            color: #1e293b !important;
+            font-size: 1.9rem !important;
+            font-weight: 800 !important;
+            font-family: 'Outfit', sans-serif !important;
+            margin-top: 8px !important;
+            margin-bottom: 4px !important;
+            line-height: 1.1 !important;
+        }
+        
+        .kpi-card-subtext {
+            color: #94a3b8 !important;
+            font-size: 0.8rem !important;
+            font-weight: 500 !important;
+            font-family: 'Inter', sans-serif !important;
+        }
+        
+        .trend-up {
+            color: #0f975a !important;
+            font-weight: 600 !important;
+        }
+        .trend-down {
+            color: #dc2626 !important;
+            font-weight: 600 !important;
+        }
+        .trend-neutral {
+            color: #94a3b8 !important;
+            font-weight: 600;
+        }
+
         .section-note {
             color: var(--muted) !important;
             font-size: 0.95rem !important;
@@ -453,7 +785,6 @@ def inject_css() -> None:
             margin-bottom: 1.25rem !important;
         }
 
-        /* Schema Box widgets (Star Schema tab) */
         .schema-box {
             background-color: #ffffff !important;
             border: 1px solid #eef1ed !important;
@@ -482,7 +813,6 @@ def inject_css() -> None:
             line-height: 1.55 !important;
         }
 
-        /* Custom Badges/Chips */
         .status-chip {
             display: inline-flex !important;
             align-items: center !important;
@@ -505,25 +835,29 @@ def style_plotly_fig(fig) -> None:
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="'Inter', sans-serif", color="#1c2826"),
-        title=dict(font=dict(family="'Outfit', sans-serif", size=15, color="#1c2826")),
+        font=dict(family="'Inter', sans-serif", color="#1e293b"),
+        title=dict(font=dict(family="'Outfit', sans-serif", size=15, color="#1e293b")),
         margin=dict(t=55, b=30, l=10, r=10),
     )
     fig.update_xaxes(
         showgrid=True, 
-        gridcolor="#eef1ec", 
-        linecolor="#d8ded5",
+        gridcolor="#e2e8f0", 
+        gridwidth=1,
+        griddash="dot",
+        showline=False,
         zeroline=False,
-        title_font=dict(family="'Inter', sans-serif", size=11, color="#5e6b66"),
-        tickfont=dict(family="'Inter', sans-serif", size=9, color="#5e6b66"),
+        title_font=dict(family="'Inter', sans-serif", size=11, color="#64748b"),
+        tickfont=dict(family="'Inter', sans-serif", size=9, color="#64748b"),
     )
     fig.update_yaxes(
         showgrid=True, 
-        gridcolor="#eef1ec", 
-        linecolor="#d8ded5",
+        gridcolor="#e2e8f0", 
+        gridwidth=1,
+        griddash="dot",
+        showline=False,
         zeroline=False,
-        title_font=dict(family="'Inter', sans-serif", size=11, color="#5e6b66"),
-        tickfont=dict(family="'Inter', sans-serif", size=9, color="#5e6b66"),
+        title_font=dict(family="'Inter', sans-serif", size=11, color="#64748b"),
+        tickfont=dict(family="'Inter', sans-serif", size=9, color="#64748b"),
     )
 
 
@@ -586,14 +920,10 @@ def rentang_ipk(ipk: float) -> str:
     return "< 3.00"
 
 
-def kategori_lama_studi(months: int, target_months: int = 48) -> str:
+def kategori_lama_studi(months: int, target_months: int = 54) -> str:
     if months <= target_months:
         return "Tepat Waktu"
-    if months <= target_months + 6:
-        return "Melewati Target <= 6 Bulan"
-    if months <= 72:
-        return "Terlambat"
-    return "Sangat Terlambat"
+    return "Terlambat"
 
 
 def similarity_category(score: float) -> str:
@@ -932,17 +1262,159 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
     on_time = df["Lama Studi"].le(target_months).mean() * 100 if total else 0
     latest_year = int(df["Tahun Wisuda"].max()) if total else "-"
 
+    # Trend calculation for Total Alumni
+    trend_html = "dari tahun sebelumnya"
+    if total > 0 and "Tahun Wisuda" in df.columns:
+        years_sorted = sorted(df["Tahun Wisuda"].dropna().unique())
+        if len(years_sorted) >= 2:
+            last_yr = years_sorted[-1]
+            prev_yr = years_sorted[-2]
+            count_last = df[df["Tahun Wisuda"] == last_yr]["NO"].count()
+            count_prev = df[df["Tahun Wisuda"] == prev_yr]["NO"].count()
+            if count_prev > 0:
+                pct_change = ((count_last - count_prev) / count_prev) * 100
+                if pct_change > 0:
+                    trend_html = f'<span class="trend-up">↑ {pct_change:.0f}%</span> dari tahun sebelumnya'
+                elif pct_change < 0:
+                    trend_html = f'<span class="trend-down">↓ {abs(pct_change):.0f}%</span> dari tahun sebelumnya'
+                else:
+                    trend_html = '<span class="trend-neutral">0%</span> dari tahun sebelumnya'
+    
+    # Subtext for Rata-rata IPK
+    ipk_cat = predikat_ipk(avg_ipk) if total else "-"
+    
+    # Subtext for Tahun Terbaru
+    latest_year_graduates = 0
+    if total:
+        latest_year_graduates = df[df["Tahun Wisuda"] == latest_year]["NO"].count()
+        latest_year_subtext = f"{latest_year_graduates} lulusan (s.d Juni)" if latest_year == 2026 else f"{latest_year_graduates} lulusan"
+    else:
+        latest_year_subtext = "-"
+
+    # Render KPI Cards in columns
     kpi_cols = st.columns(5)
-    kpi_cols[0].metric("Total Alumni", f"{total:,}".replace(",", "."))
-    kpi_cols[1].metric("Rata-rata IPK", f"{avg_ipk:.2f}" if total else "-")
-    kpi_cols[2].metric("Rata-rata Lama Studi", f"{avg_study:.1f} bulan" if total else "-")
-    kpi_cols[3].metric("Tepat Waktu", f"{on_time:.1f}%")
-    kpi_cols[4].metric("Tahun Terbaru", latest_year)
+    
+    with kpi_cols[0]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Total Alumni</span>
+                    <div class="kpi-card-icon icon-alumni">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{total}</div>
+                    <div class="kpi-card-subtext">{trend_html}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+    with kpi_cols[1]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Rata-rata IPK</span>
+                    <div class="kpi-card-icon icon-ipk">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                            <polyline points="17 6 23 6 23 12"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{f"{avg_ipk:.2f}" if total else "-"}</div>
+                    <div class="kpi-card-subtext">Kategori: {ipk_cat}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[2]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Rata-rata Lama Studi</span>
+                    <div class="kpi-card-icon icon-studi">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{f"{avg_study:.1f}" if total else "-"}</div>
+                    <div class="kpi-card-subtext">bulan</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[3]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Tepat Waktu</span>
+                    <div class="kpi-card-icon icon-tepat">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <circle cx="12" cy="12" r="6"></circle>
+                            <circle cx="12" cy="12" r="2"></circle>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{f"{on_time:.1f}%" if total else "-"}</div>
+                    <div class="kpi-card-subtext">≤ {target_months} bulan</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[4]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Tahun Terbaru</span>
+                    <div class="kpi-card-icon icon-tahun">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{latest_year}</div>
+                    <div class="kpi-card-subtext">{latest_year_subtext}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
     if df.empty:
         fig_empty = plot_empty("Tidak ada data pada filter ini.")
         style_plotly_fig(fig_empty)
-        st.plotly_chart(fig_empty, use_container_width=True)
+        st.plotly_chart(fig_empty, use_container_width=True, config={'displayModeBar': False})
         return
 
     yearly = (
@@ -960,86 +1432,123 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
 
     col_left, col_right = st.columns([1.35, 1])
     with col_left:
-        fig = px.line(
-            yearly,
-            x="Tahun Wisuda",
-            y="jumlah_lulusan",
-            markers=True,
-            title="Tren Jumlah Lulusan per Tahun",
-            labels={"jumlah_lulusan": "Jumlah Lulusan", "Tahun Wisuda": "Tahun Wisuda"},
-        )
-        fig.update_traces(line_color="#1f644e", marker_size=8)
-        style_plotly_fig(fig)
-        fig.update_layout(height=360)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            fig = px.area(
+                yearly,
+                x="Tahun Wisuda",
+                y="jumlah_lulusan",
+                title="Trend Jumlah Lulusan per Tahun",
+                labels={"jumlah_lulusan": "Jumlah Lulusan", "Tahun Wisuda": "Tahun Wisuda"},
+            )
+            # Make the spline line smooth and dashed/dotted, with area fill
+            fig.update_traces(
+                line=dict(color="#114b36", width=3, shape="spline", dash="dash"),
+                fill="tozeroy",
+                fillcolor="rgba(17, 75, 54, 0.05)"
+            )
+            # Add small markers on top
+            fig.add_scatter(
+                x=yearly["Tahun Wisuda"],
+                y=yearly["jumlah_lulusan"],
+                mode="markers",
+                marker=dict(color="#114b36", size=7, symbol="circle"),
+                showlegend=False
+            )
+            style_plotly_fig(fig)
+            fig.update_layout(height=360)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_right:
-        fig = px.bar(
-            df["Rentang IPK"].value_counts().rename_axis("Rentang IPK").reset_index(name="Jumlah"),
-            x="Rentang IPK",
-            y="Jumlah",
-            title="Distribusi Rentang IPK",
-            color="Rentang IPK",
-            color_discrete_sequence=["#5b7894", "#1f644e", "#88a299", "#b87333", "#c23b3f"],
-        )
-        style_plotly_fig(fig)
-        fig.update_layout(height=360, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            # Sort the Rentang IPK in order from highest to lowest
+            ipk_counts = df["Rentang IPK"].value_counts()
+            order = ["3.75 - 4.00", "3.50 - 3.74", "3.25 - 3.49", "3.00 - 3.24", "< 3.00"]
+            valid_order = [o for o in order if o in ipk_counts.index]
+            ipk_counts_df = ipk_counts.reindex(valid_order).reset_index(name="Jumlah")
+            
+            fig = px.bar(
+                ipk_counts_df,
+                x="Rentang IPK",
+                y="Jumlah",
+                title="Distribusi Rentang IPK",
+                color="Rentang IPK",
+                color_discrete_map={
+                    "3.75 - 4.00": "#0b3626", # Dark Green
+                    "3.50 - 3.74": "#114b36", # Forest Green
+                    "3.25 - 3.49": "#20c997", # Teal Green
+                    "3.00 - 3.24": "#86efac", # Soft Green
+                    "< 3.00": "#dc2626",      # Crimson Red
+                }
+            )
+            try:
+                fig.update_layout(barcornerradius=8)
+            except Exception:
+                pass
+            style_plotly_fig(fig)
+            fig.update_layout(height=360, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     col_left, col_right = st.columns([1.1, 1])
     with col_left:
-        fig = px.bar(
-            period.tail(40),
-            x="label",
-            y="jumlah_lulusan",
-            color="rata_ipk",
-            title="Lulusan per Periode Wisuda",
-            labels={"label": "Periode", "jumlah_lulusan": "Jumlah", "rata_ipk": "Rata-rata IPK"},
-            color_continuous_scale=["#e2ede7", "#5f8b6b", "#1f644e"],
-        )
-        style_plotly_fig(fig)
-        fig.update_layout(height=390, xaxis_tickangle=-45)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            fig = px.bar(
+                period.tail(40),
+                x="label",
+                y="jumlah_lulusan",
+                color="rata_ipk",
+                title="Lulusan per Periode Wisuda",
+                labels={"label": "Periode", "jumlah_lulusan": "Jumlah", "rata_ipk": "Rata-rata IPK"},
+                color_continuous_scale=["#e8f5e9", "#4f826d", "#114b36"],
+            )
+            style_plotly_fig(fig)
+            fig.update_layout(height=390, xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_right:
-        study = df.assign(Kategori=df["Lama Studi"].apply(lambda x: kategori_lama_studi(int(x), target_months)))
-        study_counts = study["Kategori"].value_counts().rename_axis("Kategori").reset_index(name="Jumlah")
-        fig = px.pie(
-            study_counts,
-            names="Kategori",
-            values="Jumlah",
-            title="Komposisi Lama Studi",
-            hole=.48,
-            color_discrete_sequence=["#1f644e", "#b87333", "#c47c43", "#c23b3f"],
-        )
-        style_plotly_fig(fig)
-        fig.update_layout(height=390)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            study = df.assign(Kategori=df["Lama Studi"].apply(lambda x: kategori_lama_studi(int(x), target_months)))
+            study_counts = study["Kategori"].value_counts().rename_axis("Kategori").reset_index(name="Jumlah")
+            fig = px.pie(
+                study_counts,
+                names="Kategori",
+                values="Jumlah",
+                title="Komposisi Lama Studi",
+                hole=.48,
+                color="Kategori",
+                color_discrete_map={
+                    "Tepat Waktu": "#114b36",
+                    "Terlambat": "#c23b3f",
+                }
+            )
+            style_plotly_fig(fig)
+            fig.update_layout(height=390)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-    fig = px.scatter(
-        df,
-        x="Lama Studi",
-        y="IPK",
-        color="Tahun Wisuda",
-        custom_data=["Nama", "NIM", "Periode Wisuda", "Tahun Wisuda", "Judul Tugas Akhir"],
-        title="Sebaran IPK dan Lama Studi Alumni",
-        labels={"Lama Studi": "Lama Studi (bulan)", "IPK": "IPK"},
-        color_continuous_scale=["#b8c5a3", "#4f7f70", "#203b5b"],
-    )
-    fig.update_traces(
-        hovertemplate=(
-             "<b>%{customdata[0]}</b><br>"
-             "NIM: %{customdata[1]}<br>"
-             "Periode: %{customdata[2]} %{customdata[3]}<br>"
-             "Lama Studi: %{x} bulan<br>"
-             "IPK: %{y:.2f}<br>"
-             "Judul: %{customdata[4]}<extra></extra>"
+    with st.container(border=True):
+        fig = px.scatter(
+            df,
+            x="Lama Studi",
+            y="IPK",
+            color="Tahun Wisuda",
+            custom_data=["Nama", "NIM", "Periode Wisuda", "Tahun Wisuda", "Judul Tugas Akhir"],
+            title="Sebaran IPK dan Lama Studi Alumni",
+            labels={"Lama Studi": "Lama Studi (bulan)", "IPK": "IPK"},
+            color_continuous_scale=["#b8c5a3", "#4f7f70", "#114b36"],
         )
-    )
-    fig.add_vline(x=target_months, line_dash="dash", line_color="#c23b3f", annotation_text=f"Target {target_months} bulan")
-    style_plotly_fig(fig)
-    fig.update_layout(height=460)
-    st.plotly_chart(fig, use_container_width=True)
+        fig.update_traces(
+            hovertemplate=(
+                 "<b>%{customdata[0]}</b><br>"
+                 "NIM: %{customdata[1]}<br>"
+                 "Periode: %{customdata[2]} %{customdata[3]}<br>"
+                 "Lama Studi: %{x} bulan<br>"
+                 "IPK: %{y:.2f}<br>"
+                 "Judul: %{customdata[4]}<extra></extra>"
+            )
+        )
+        fig.add_vline(x=target_months, line_dash="dash", line_color="#c23b3f", annotation_text=f"Target {target_months} bulan")
+        style_plotly_fig(fig)
+        fig.update_layout(height=460)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with st.expander("Audit Data Alumni"):
         query = st.text_input("Cari nama/NIM", placeholder="Contoh: Fitrah Annisa Sari")
@@ -1069,6 +1578,7 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
         )
 
 
+
 def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
     st.markdown('<p class="section-note">Analisis dosen memakai bridge table agar satu alumni dapat terhubung ke beberapa pembimbing dan penguji.</p>', unsafe_allow_html=True)
     if schema.bridge_peran_dosen.empty:
@@ -1076,16 +1586,14 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
         return
 
     bridge = schema.bridge_peran_dosen.merge(schema.dim_dosen, on="dosen_key", how="left")
-    total_roles = len(bridge)
     unique_lecturers = bridge["dosen_key"].nunique()
     advisor_roles = bridge["jenis_peran"].eq("Pembimbing").sum()
     examiner_roles = bridge["jenis_peran"].eq("Penguji").sum()
 
-    kpi_cols = st.columns(4)
-    kpi_cols[0].metric("Total Relasi Dosen", f"{total_roles:,}".replace(",", "."))
-    kpi_cols[1].metric("Dosen Unik", unique_lecturers)
-    kpi_cols[2].metric("Peran Pembimbing", advisor_roles)
-    kpi_cols[3].metric("Peran Penguji", examiner_roles)
+    kpi_cols = st.columns(3)
+    kpi_cols[0].metric("Dosen", unique_lecturers)
+    kpi_cols[1].metric("Peran Pembimbing", advisor_roles)
+    kpi_cols[2].metric("Peran Penguji", examiner_roles)
 
     top_all = (
         bridge.groupby(["dosen_key", "nama_dosen_normalized"], as_index=False)
@@ -1112,7 +1620,7 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
         )
         style_plotly_fig(fig)
         fig.update_layout(height=520)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_right:
         fig = px.bar(
@@ -1127,7 +1635,7 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
         )
         style_plotly_fig(fig)
         fig.update_layout(height=520, yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     st.dataframe(
         top_role.rename(
@@ -1143,10 +1651,6 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
 
 
 def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
-    st.markdown(
-        '<p class="section-note">Analisis dosen memakai vw_dashboard_peran_dosen yang berasal dari bridge_peran_dosen pada PostgreSQL star schema.</p>',
-        unsafe_allow_html=True,
-    )
     if role_df.empty:
         st.info("Tidak ada data peran dosen pada filter ini.")
         return
@@ -1157,12 +1661,101 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
     advisor_roles = int(role_df.loc[role_df["jenis_peran"].eq("Pembimbing"), "role_count"].sum())
     examiner_roles = int(role_df.loc[role_df["jenis_peran"].eq("Penguji"), "role_count"].sum())
 
-    kpi_cols = st.columns(5)
-    kpi_cols[0].metric("Total Relasi Peran", f"{total_roles:,}".replace(",", "."))
-    kpi_cols[1].metric("Alumni Terlibat", f"{total_alumni:,}".replace(",", "."))
-    kpi_cols[2].metric("Dosen Unik", unique_lecturers)
-    kpi_cols[3].metric("Peran Pembimbing", advisor_roles)
-    kpi_cols[4].metric("Peran Penguji", examiner_roles)
+    # Render custom HTML KPI Cards
+    kpi_cols = st.columns(4)
+    
+    with kpi_cols[0]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Alumni Terlibat</span>
+                    <div class="kpi-card-icon icon-ipk">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{total_alumni:,}</div>
+                    <div class="kpi-card-subtext">Alumni Unik</div>
+                </div>
+            </div>
+            """.replace(",", "."),
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[1]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Dosen</span>
+                    <div class="kpi-card-icon icon-tahun">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 22s1-4 8-4 8 4 8 4"></path>
+                            <circle cx="10" cy="8" r="5"></circle>
+                            <path d="M17 11h6"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{unique_lecturers}</div>
+                    <div class="kpi-card-subtext">Dosen Terdaftar</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[2]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Peran Pembimbing</span>
+                    <div class="kpi-card-icon icon-studi">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{advisor_roles}</div>
+                    <div class="kpi-card-subtext">Pembimbing TA</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[3]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Peran Penguji</span>
+                    <div class="kpi-card-icon icon-tepat">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{examiner_roles}</div>
+                    <div class="kpi-card-subtext">Penguji Sidang</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
     top_all = (
         role_df.groupby(["dosen_key", "nama_dosen_normalized"], as_index=False)
@@ -1181,36 +1774,49 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
 
     col_left, col_right = st.columns([1.2, 1])
     with col_left:
-        fig = px.bar(
-            top_role_chart.sort_values("jumlah_peran"),
-            x="jumlah",
-            y="nama_dosen_normalized",
-            color="jenis_peran",
-            orientation="h",
-            title="Top Dosen Berdasarkan Total Relasi Peran",
-            labels={"jumlah": "Jumlah Peran", "nama_dosen_normalized": "Dosen", "jenis_peran": "Jenis Peran"},
-            color_discrete_map={"Pembimbing": "#1f644e", "Penguji": "#d4a373"},
-        )
-        fig.update_layout(
-            height=520,
-            margin=dict(l=10, r=10, t=55, b=10),
-            barmode="stack",
-            yaxis={"categoryorder": "total ascending"},
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            fig = px.bar(
+                top_role_chart.sort_values("jumlah_peran"),
+                x="jumlah",
+                y="nama_dosen_normalized",
+                color="jenis_peran",
+                orientation="h",
+                title="Top Dosen Berdasarkan Total Relasi Peran",
+                labels={"jumlah": "Jumlah Peran", "nama_dosen_normalized": "Dosen", "jenis_peran": "Jenis Peran"},
+                color_discrete_map={"Pembimbing": "#114b36", "Penguji": "#d4a373"},
+            )
+            try:
+                fig.update_layout(barcornerradius=6)
+            except Exception:
+                pass
+            style_plotly_fig(fig)
+            fig.update_layout(
+                height=520,
+                margin=dict(l=10, r=10, t=55, b=10),
+                barmode="stack",
+                yaxis={"categoryorder": "total ascending"},
+            )
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_right:
-        fig = px.bar(
-            top_all.sort_values("jumlah_peran"),
-            x=["jumlah_peran", "jumlah_alumni"],
-            y="nama_dosen_normalized",
-            orientation="h",
-            title="Perbandingan Total Peran vs Alumni Unik",
-            labels={"value": "Jumlah", "nama_dosen_normalized": "Dosen", "variable": "Metrik"},
-            color_discrete_sequence=["#1f644e", "#5b7894"],
-        )
-        fig.update_layout(height=520, margin=dict(l=10, r=10, t=55, b=10), yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            fig = px.bar(
+                top_all.sort_values("jumlah_peran"),
+                x=["jumlah_peran", "jumlah_alumni"],
+                y="nama_dosen_normalized",
+                orientation="h",
+                title="Perbandingan Total Peran vs Alumni Unik",
+                labels={"value": "Jumlah", "nama_dosen_normalized": "Dosen", "variable": "Metrik"},
+                color_discrete_sequence=["#114b36", "#5b7894"],
+            )
+            try:
+                fig.update_layout(barcornerradius=6)
+            except Exception:
+                pass
+            style_plotly_fig(fig)
+            fig.update_layout(height=520, margin=dict(l=10, r=10, t=55, b=10), yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
 
     table = (
         top_role.pivot_table(
@@ -1244,12 +1850,6 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
 
 
 def nlp_dashboard(df: pd.DataFrame) -> None:
-    st.markdown(
-        '<p class="section-note">Tab ini membaca atribut NLP dari dim_tugas_akhir: judul hasil preprocessing, skor SBERT + cosine similarity tertinggi, kategori keunikan, judul termirip, dan koordinat PCA.</p>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<span class="status-chip">NLP source: dim_tugas_akhir, SBERT + cosine similarity</span>', unsafe_allow_html=True)
-
     if df.empty or df["skor_kemiripan_tertinggi"].isna().all():
         st.info("Tidak ada atribut NLP pada dim_tugas_akhir untuk filter ini.")
         return
@@ -1260,127 +1860,193 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
     redundant_count = df_nlp["skor_kemiripan_tertinggi"].ge(0.85).sum()
     review_count = df_nlp["skor_kemiripan_tertinggi"].between(0.70, 0.8499).sum()
 
+    # Render custom HTML KPI Cards
     kpi_cols = st.columns(4)
-    kpi_cols[0].metric("Rata-rata Similarity Tertinggi", f"{avg_similarity:.3f}")
-    kpi_cols[1].metric("Indeks Keunikan", f"{uniqueness_index:.1f}/100")
-    kpi_cols[2].metric("Tidak Unik", int(redundant_count))
-    kpi_cols[3].metric("Perlu Review", int(review_count))
+    
+    with kpi_cols[0]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Rata-rata Similarity Tertinggi</span>
+                    <div class="kpi-card-icon icon-alumni">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{avg_similarity * 100:.1f}%</div>
+                    <div class="kpi-card-subtext">Skor Cosine SBERT</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-    heatmap_size = st.slider(
-        "Jumlah pasangan dalam heatmap NLP",
-        min_value=8,
-        max_value=min(30, len(df_nlp)),
-        value=min(18, len(df_nlp)),
-        help="Diurutkan dari judul dengan skor SBERT cosine similarity tertinggi.",
-    )
-    heatmap_df = df_nlp.sort_values("skor_kemiripan_tertinggi", ascending=False).head(heatmap_size).copy()
-    heatmap_df["Judul"] = heatmap_df["Nama"].astype(str) + " | " + heatmap_df["Judul Tugas Akhir"].astype(str).str.slice(0, 54)
-    heatmap_df["Judul Termirip"] = (
-        heatmap_df["pemilik_judul_termirip"].fillna("-").astype(str)
-        + " | "
-        + heatmap_df["judul_termirip"].fillna("-").astype(str).str.slice(0, 54)
-    )
-    heatmap_matrix = heatmap_df.pivot_table(
-        index="Judul",
-        columns="Judul Termirip",
-        values="skor_kemiripan_tertinggi",
-        aggfunc="max",
-    )
-    fig = px.imshow(
-        heatmap_matrix,
-        zmin=0,
-        zmax=1,
-        color_continuous_scale=["#fcfbfa", "#c9d9c8", "#6b9a7b", "#c23b3f"],
-        title="Heatmap NLP dari dim_tugas_akhir: Judul dan Judul Termirip",
-        labels={"x": "Judul Termirip", "y": "Judul TA", "color": "Skor"},
-        aspect="auto",
-    )
-    style_plotly_fig(fig)
-    fig.update_layout(height=620, margin=dict(l=10, r=10, t=60, b=145), xaxis_tickangle=-45)
-    st.plotly_chart(fig, use_container_width=True)
+    with kpi_cols[1]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Indeks Keunikan</span>
+                    <div class="kpi-card-icon icon-ipk">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{uniqueness_index:.1f}/100</div>
+                    <div class="kpi-card-subtext">Keunikan Dataset</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[2]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Tidak Unik</span>
+                    <div class="kpi-card-icon icon-tepat">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{int(redundant_count)}</div>
+                    <div class="kpi-card-subtext">Skor similarity &ge; 0.85</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with kpi_cols[3]:
+        st.markdown(
+            f"""
+            <div class="kpi-card-custom">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">Perlu Review</span>
+                    <div class="kpi-card-icon icon-studi">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-card-value">{int(review_count)}</div>
+                    <div class="kpi-card-subtext">Skor similarity 0.70 - 0.84</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
+
+
 
     col_left, col_right = st.columns([1.2, 1])
     with col_left:
-        fig = px.histogram(
-            df_nlp,
-            x="skor_kemiripan_tertinggi",
-            nbins=30,
-            color="kategori_keunikan",
-            title="Distribusi Skor SBERT Cosine Similarity Tertinggi",
-            labels={"skor_kemiripan_tertinggi": "Skor Cosine Similarity", "count": "Jumlah Judul"},
-            color_discrete_map={
-                "Unik": "#1f644e",
-                "Agak Unik / Perlu Review": "#b87333",
-                "Tidak Unik": "#c23b3f",
-            },
-        )
-        fig.add_vline(x=0.70, line_dash="dash", line_color="#b87333", annotation_text="Review 0.70")
-        fig.add_vline(x=0.85, line_dash="dash", line_color="#c23b3f", annotation_text="Tidak unik 0.85")
-        style_plotly_fig(fig)
-        fig.update_layout(height=410)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_right:
-        fig = go.Figure()
-        fig.add_trace(
-            go.Indicator(
-                mode="gauge+number",
-                value=uniqueness_index,
-                title={"text": "Indeks Keunikan Dataset TA"},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar": {"color": "#1f644e"},
-                    "steps": [
-                        {"range": [0, 40], "color": "#efd2cf"},
-                        {"range": [40, 70], "color": "#eee0b6"},
-                        {"range": [70, 100], "color": "#d8e6d5"},
-                    ],
-                    "threshold": {"line": {"color": "#c23b3f", "width": 4}, "value": uniqueness_index},
-                },
-            )
-        )
-        style_plotly_fig(fig)
-        fig.update_layout(height=410)
-        st.plotly_chart(fig, use_container_width=True)
-
-    col_left, col_right = st.columns([1.1, 1])
-    with col_left:
-        scatter_df = df_nlp.dropna(subset=["pca_x", "pca_y"]).copy()
-        if scatter_df.empty:
-            fig_empty = plot_empty("Koordinat PCA belum tersedia di dim_tugas_akhir.")
-            style_plotly_fig(fig_empty)
-            st.plotly_chart(fig_empty, use_container_width=True)
-        else:
-            fig = px.scatter(
-                scatter_df,
-                x="pca_x",
-                y="pca_y",
+        with st.container(border=True):
+            fig = px.histogram(
+                df_nlp,
+                x="skor_kemiripan_tertinggi",
+                nbins=30,
                 color="kategori_keunikan",
-                hover_data=["Nama", "Judul Tugas Akhir", "skor_kemiripan_tertinggi", "judul_termirip"],
-                title="Peta Kedekatan Judul TA dari Koordinat PCA SBERT",
+                title="Distribusi Skor SBERT Cosine Similarity Tertinggi",
+                labels={"skor_kemiripan_tertinggi": "Skor Cosine Similarity", "count": "Jumlah Judul"},
                 color_discrete_map={
-                    "Unik": "#1f644e",
+                    "Unik": "#114b36",
                     "Agak Unik / Perlu Review": "#b87333",
                     "Tidak Unik": "#c23b3f",
                 },
             )
+            fig.add_vline(x=0.70, line_dash="dash", line_color="#b87333", annotation_text="Review 0.70")
+            fig.add_vline(x=0.85, line_dash="dash", line_color="#c23b3f", annotation_text="Tidak unik 0.85")
             style_plotly_fig(fig)
-            fig.update_layout(height=460)
-            st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(height=410)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_right:
-        keywords = top_keywords(df_nlp["Judul Final"], 18)
-        fig = px.bar(
-            keywords.sort_values("Frekuensi"),
-            x="Frekuensi",
-            y="Kata",
-            orientation="h",
-            title="Kata Kunci Dominan Setelah Stopword Removal",
-            color_discrete_sequence=["#5b7894"],
-        )
-        style_plotly_fig(fig)
-        fig.update_layout(height=460)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            fig = go.Figure()
+            fig.add_trace(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=uniqueness_index,
+                    title={"text": "Indeks Keunikan Dataset TA"},
+                    gauge={
+                        "axis": {"range": [0, 100]},
+                        "bar": {"color": "#114b36"},
+                        "steps": [
+                            {"range": [0, 40], "color": "#efd2cf"},
+                            {"range": [40, 70], "color": "#eee0b6"},
+                            {"range": [70, 100], "color": "#d8e6d5"},
+                        ],
+                        "threshold": {"line": {"color": "#c23b3f", "width": 4}, "value": uniqueness_index},
+                    },
+                )
+            )
+            style_plotly_fig(fig)
+            fig.update_layout(height=410)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+    col_left, col_right = st.columns([1.1, 1])
+    with col_left:
+        with st.container(border=True):
+            scatter_df = df_nlp.dropna(subset=["pca_x", "pca_y"]).copy()
+            if scatter_df.empty:
+                fig_empty = plot_empty("Koordinat PCA belum tersedia di dim_tugas_akhir.")
+                style_plotly_fig(fig_empty)
+                st.plotly_chart(fig_empty, use_container_width=True, config={'displayModeBar': False})
+            else:
+                fig = px.scatter(
+                    scatter_df,
+                    x="pca_x",
+                    y="pca_y",
+                    color="kategori_keunikan",
+                    hover_data=["Nama", "Judul Tugas Akhir", "skor_kemiripan_tertinggi", "judul_termirip"],
+                    title="Peta Kedekatan Judul TA dari Koordinat PCA SBERT",
+                    color_discrete_map={
+                        "Unik": "#114b36",
+                        "Agak Unik / Perlu Review": "#b87333",
+                        "Tidak Unik": "#c23b3f",
+                    },
+                )
+                style_plotly_fig(fig)
+                fig.update_layout(height=460)
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+    with col_right:
+        with st.container(border=True):
+            keywords = top_keywords(df_nlp["Judul Final"], 18)
+            fig = px.bar(
+                keywords.sort_values("Frekuensi"),
+                x="Frekuensi",
+                y="Kata",
+                orientation="h",
+                title="Kata Kunci Dominan Setelah Stopword Removal",
+                color_discrete_sequence=["#5b7894"],
+            )
+            try:
+                fig.update_layout(barcornerradius=4)
+            except Exception:
+                pass
+            style_plotly_fig(fig)
+            fig.update_layout(height=460)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     st.subheader("Top Judul Paling Mirip Berdasarkan dim_tugas_akhir")
     top_pairs = df_nlp.sort_values("skor_kemiripan_tertinggi", ascending=False)[
@@ -1508,6 +2174,149 @@ def data_quality_dashboard(df: pd.DataFrame, schema: StarSchema, source_label: s
     st.dataframe(df[preview_cols].head(150), use_container_width=True, hide_index=True)
 
 
+
+def get_next_key(cur, table, key_column):
+    cur.execute(f"SELECT COALESCE(MAX({key_column}), 0) + 1 FROM {table}")
+    return cur.fetchone()[0]
+
+
+def save_records_to_db(records_list: list[dict]) -> tuple[bool, str]:
+    db_url = get_database_url()
+    try:
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                for r in records_list:
+                    # 1. Check or insert dim_mahasiswa
+                    cur.execute("SELECT mahasiswa_key FROM dim_mahasiswa WHERE nim = %s", (str(r["nim"]),))
+                    row = cur.fetchone()
+                    if row:
+                        mahasiswa_key = row[0]
+                    else:
+                        mahasiswa_key = get_next_key(cur, "dim_mahasiswa", "mahasiswa_key")
+                        cur.execute(
+                            "INSERT INTO dim_mahasiswa (mahasiswa_key, nim, nama) VALUES (%s, %s, %s)",
+                            (mahasiswa_key, str(r["nim"]), r["nama"])
+                        )
+                    
+                    # 2. Check or insert dim_waktu
+                    tanggal_lulus = pd.to_datetime(r["tanggal_lulus"]).date()
+                    cur.execute("SELECT waktu_key FROM dim_waktu WHERE tanggal_lulus = %s", (tanggal_lulus,))
+                    row = cur.fetchone()
+                    if row:
+                        waktu_key = row[0]
+                    else:
+                        waktu_key = get_next_key(cur, "dim_waktu", "waktu_key")
+                        cur.execute(
+                            "INSERT INTO dim_waktu (waktu_key, tanggal_lulus, hari, bulan, tahun) VALUES (%s, %s, %s, %s, %s)",
+                            (waktu_key, tanggal_lulus, tanggal_lulus.day, tanggal_lulus.month, tanggal_lulus.year)
+                        )
+                        
+                    # 3. Check or insert dim_periode_wisuda
+                    cur.execute(
+                        "SELECT periode_key FROM dim_periode_wisuda WHERE tahun_wisuda = %s AND periode_label = %s",
+                        (int(r["tahun_wisuda"]), r["periode_wisuda"])
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        periode_key = row[0]
+                    else:
+                        periode_key = get_next_key(cur, "dim_periode_wisuda", "periode_key")
+                        p_num = PERIODE_ORDER.get(r["periode_wisuda"], 99)
+                        cur.execute(
+                            "INSERT INTO dim_periode_wisuda (periode_key, tahun_wisuda, periode_num, periode_label) VALUES (%s, %s, %s, %s)",
+                            (periode_key, int(r["tahun_wisuda"]), p_num, r["periode_wisuda"])
+                        )
+                        
+                    # 4. Check or insert dim_ipk
+                    ipk_val = float(r["ipk"])
+                    r_ipk = rentang_ipk(ipk_val)
+                    p_ipk = predikat_ipk(ipk_val)
+                    cur.execute(
+                        "SELECT ipk_key FROM dim_ipk WHERE ipk_numeric = %s",
+                        (ipk_val,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        ipk_key = row[0]
+                    else:
+                        ipk_key = get_next_key(cur, "dim_ipk", "ipk_key")
+                        cur.execute(
+                            "INSERT INTO dim_ipk (ipk_key, ipk_numeric, rentang_ipk, predikat_ipk) VALUES (%s, %s, %s, %s)",
+                            (ipk_key, ipk_val, r_ipk, p_ipk)
+                        )
+                        
+                    # 5. Check or insert dim_lama_studi
+                    months_val = int(r["lama_studi"])
+                    k_studi = kategori_lama_studi(months_val, 54)
+                    f_tepat = months_val <= 54
+                    cur.execute(
+                        "SELECT lama_studi_key FROM dim_lama_studi WHERE lama_studi_bulan = %s",
+                        (months_val,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        lama_studi_key = row[0]
+                    else:
+                        lama_studi_key = get_next_key(cur, "dim_lama_studi", "lama_studi_key")
+                        cur.execute(
+                            "INSERT INTO dim_lama_studi (lama_studi_key, lama_studi_bulan, kategori_lama_studi, flag_tepat_waktu) VALUES (%s, %s, %s, %s)",
+                            (lama_studi_key, months_val, k_studi, f_tepat)
+                        )
+                        
+                    # 6. Insert dim_tugas_akhir
+                    ta_key = get_next_key(cur, "dim_tugas_akhir", "ta_key")
+                    j_clean = clean_title(r["judul_ta"])
+                    j_final = final_title(r["judul_ta"])
+                    cur.execute(
+                        "INSERT INTO dim_tugas_akhir (ta_key, judul_tugas_akhir, judul_preprocessed, judul_final, skor_kemiripan_tertinggi, kategori_keunikan, ta_key_termirip, pca_x, pca_y) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (ta_key, r["judul_ta"], j_clean, j_final, None, "Belum Dihitung", None, None, None)
+                    )
+                    
+                    # 7. Insert fact_kelulusan
+                    kelulusan_key = get_next_key(cur, "fact_kelulusan", "kelulusan_key")
+                    cur.execute(
+                        "INSERT INTO fact_kelulusan (kelulusan_key, mahasiswa_key, waktu_key, periode_key, ipk_key, lama_studi_key, ta_key, ipk, lama_studi_bulan, flag_tepat_waktu, jumlah_record) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (kelulusan_key, mahasiswa_key, waktu_key, periode_key, ipk_key, lama_studi_key, ta_key, ipk_val, months_val, f_tepat, 1)
+                    )
+                    
+                    # 8. Check and insert Lecturers in bridge table
+                    role_columns = [
+                        ("pembimbing_1", "Pembimbing", 1),
+                        ("pembimbing_2", "Pembimbing", 2),
+                        ("penguji_1", "Penguji", 1),
+                        ("penguji_2", "Penguji", 2),
+                        ("penguji_3", "Penguji", 3),
+                    ]
+                    for key_name, jenis_peran, urutan_peran in role_columns:
+                        val = r.get(key_name)
+                        normalized = normalize_person_name(val)
+                        if normalized is None:
+                            continue
+                        
+                        # Get or insert dim_dosen
+                        cur.execute("SELECT dosen_key FROM dim_dosen WHERE nama_dosen_normalized = %s", (normalized,))
+                        row = cur.fetchone()
+                        if row:
+                            dosen_key = row[0]
+                        else:
+                            dosen_key = get_next_key(cur, "dim_dosen", "dosen_key")
+                            cur.execute(
+                                "INSERT INTO dim_dosen (dosen_key, nama_dosen_normalized, nama_asal) VALUES (%s, %s, %s)",
+                                (dosen_key, normalized, str(val).strip())
+                            )
+                            
+                        # Insert bridge_peran_dosen
+                        peran_key = get_next_key(cur, "bridge_peran_dosen", "peran_dosen_key")
+                        cur.execute(
+                            "INSERT INTO bridge_peran_dosen (peran_dosen_key, kelulusan_key, dosen_key, jenis_peran, urutan_peran, role_count) VALUES (%s, %s, %s, %s, %s, %s)",
+                            (peran_key, kelulusan_key, dosen_key, jenis_peran, urutan_peran, 1)
+                        )
+            conn.commit()
+        return True, "Data berhasil disimpan ke database!"
+    except Exception as e:
+        return False, str(e)
+
+
 def render_header(df: pd.DataFrame) -> None:
     min_year = int(df["Tahun Wisuda"].min())
     max_year = int(df["Tahun Wisuda"].max())
@@ -1532,47 +2341,47 @@ def main() -> None:
 
     # Render Logo and Brand in Sidebar (Compact, Premium Front-end Layout)
     logo_path = Path("img/unandlogo.png")
+    logo_html = ""
     if logo_path.exists():
         try:
             logo_base64 = get_base64_image(logo_path)
-            st.sidebar.markdown(
-                f"""
-                <div style="display: flex; align-items: center; gap: 12px; height: 36px; margin-bottom: 1.2rem;">
-                    <img src="data:image/png;base64,{logo_base64}" style="height: 34px; width: auto; object-fit: contain;" />
-                    <span style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 800; color: #1f644e; letter-spacing: 0.5px; white-space: nowrap;">LENSA DSI</span>
-                </div>
-                <div style="margin-top: -10px; margin-bottom: 1.5rem; border-bottom: 1px solid #b4c5be;"></div>
-                """,
-                unsafe_allow_html=True
-            )
+            logo_html = f'<img src="data:image/png;base64,{logo_base64}" class="brand-logo-img" />'
         except Exception:
-            # Fallback in case base64 reading encounters issues
-            st.sidebar.markdown(
-                """
-                <div style="display: flex; align-items: center; height: 36px; margin-bottom: 1.2rem;">
-                    <span style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 800; color: #1f644e; letter-spacing: 0.5px; white-space: nowrap;">LENSA DSI</span>
-                </div>
-                <div style="margin-top: -10px; margin-bottom: 1.5rem; border-bottom: 1px solid #b4c5be;"></div>
-                """,
-                unsafe_allow_html=True
-            )
-    else:
-        st.sidebar.markdown(
-            """
-            <div style="display: flex; align-items: center; height: 36px; margin-bottom: 1.2rem;">
-                <span style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; font-weight: 800; color: #1f644e; letter-spacing: 0.5px; white-space: nowrap;">LENSA DSI</span>
+            logo_html = """
+            <div class="logo-box">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="logo-cap">
+                    <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                    <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/>
+                </svg>
             </div>
-            <div style="margin-top: -10px; margin-bottom: 1.5rem; border-bottom: 1px solid #b4c5be;"></div>
-            """,
-            unsafe_allow_html=True
-        )
+            """
+    else:
+        logo_html = """
+        <div class="logo-box">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="logo-cap">
+                <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/>
+            </svg>
+        </div>
+        """
 
-    st.sidebar.header("Database")
-    if st.sidebar.button("Refresh data dari PostgreSQL"):
-        st.cache_data.clear()
-        st.rerun()
+    st.sidebar.markdown(
+        f"""
+        <div class="sidebar-brand-container">
+            {logo_html}
+            <div class="brand-text">
+                <div class="brand-title">LENSA DSI</div>
+                <div class="brand-subtitle">Analytics Dashboard</div>
+            </div>
+        </div>
+        <div class="brand-org">Universitas Andalas</div>
+        <div class="brand-divider"></div>
+        """,
+        unsafe_allow_html=True
+    )
 
     try:
+        # Load data first to get years and database status
         df = load_dashboard_data_from_db()
         role_df = load_roles_data_from_db()
         schema = load_star_schema_from_db()
@@ -1584,34 +2393,437 @@ def main() -> None:
         render_database_setup(Exception("vw_dashboard_kelulusan kosong. Jalankan scripts/load_star_schema.py untuk memuat data."))
         return
 
+    # Render Data Source Card inside a container to avoid overlapping issues
+    now = datetime.datetime.now()
+    months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Ags", "Sep", "Okt", "Nov", "Des"]
+    current_time_str = f"{now.day:02d} {months[now.month-1]} {now.year} - {now.strftime('%H:%M')}"
+    
+    with st.sidebar.container(border=True):
+        st.markdown(
+            f"""
+            <div class="card-header" style="margin-bottom: 12px;">
+                <svg class="db-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                    <path d="M3 5V19A9 3 0 0 0 21 19V5"></path>
+                    <path d="M3 12A9 3 0 0 0 21 12"></path>
+                </svg>
+                <span class="card-title">Data Source</span>
+            </div>
+            <div class="card-row" style="margin-bottom: 8px;">
+                <span class="row-label">Status:</span>
+                <span class="status-badge"><span class="dot"></span>Connected</span>
+            </div>
+            <div class="card-row-stack" style="margin-bottom: 8px;">
+                <div class="row-label">Last Update:</div>
+                <div class="update-time">{current_time_str}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("🔄 Sync Data", key="sync_data_btn", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
     render_header(df)
 
-    st.sidebar.header("Filter Dashboard")
-    min_year = int(df["Tahun Wisuda"].min())
-    max_year = int(df["Tahun Wisuda"].max())
-    years = st.sidebar.slider("Tahun Wisuda", min_year, max_year, (min_year, max_year))
-    periode_options = sorted(df["Periode Wisuda"].dropna().unique().tolist(), key=lambda x: PERIODE_ORDER.get(x, 99))
-    selected_periode = st.sidebar.multiselect("Periode Wisuda", periode_options, default=periode_options)
-    ipk_min = float(np.floor(df["IPK"].min() * 10) / 10)
-    ipk_max = float(np.ceil(df["IPK"].max() * 10) / 10)
-    ipk_range = st.sidebar.slider("Rentang IPK", ipk_min, ipk_max, (ipk_min, ipk_max), step=0.01)
-    target_months = st.sidebar.slider("Target Tepat Waktu (bulan)", 42, 60, 48, step=1)
-    st.sidebar.caption("Target default 48 bulan mengikuti desain star schema terbaru.")
+    if "page" not in st.session_state:
+        st.session_state.page = "Dashboard"
 
-    filtered = filter_dataframe(df, years, selected_periode, ipk_range)
-    filtered_roles = filter_roles_dataframe(role_df, years, selected_periode, ipk_range)
+    style_lines = []
 
-    tabs = st.tabs(["Akademik", "Dosen", "Kemiripan Tugas Akhir", "Star Schema", "Kualitas Data"])
-    with tabs[0]:
-        academic_dashboard(filtered, target_months)
-    with tabs[1]:
-        lecturer_dashboard_from_roles(filtered_roles)
-    with tabs[2]:
-        nlp_dashboard(filtered)
-    with tabs[3]:
-        star_schema_dashboard(schema)
-    with tabs[4]:
-        data_quality_dashboard(df, schema, get_database_url())
+    st.sidebar.markdown(
+        '<div style="font-family: \'Outfit\', sans-serif; font-size: 0.85rem; font-weight: 700; color: #5e6b66; margin-bottom: 8px; margin-top: 10px;">NAVIGASI</div>',
+        unsafe_allow_html=True
+    )
+    col_nav1, col_nav2 = st.sidebar.columns(2)
+    with col_nav1:
+        if st.button("📊 Dashboard", key="btn_nav_dash", use_container_width=True):
+            st.session_state.page = "Dashboard"
+            st.rerun()
+    with col_nav2:
+        if st.button("👤 Tendik", key="btn_nav_tendik", use_container_width=True):
+            st.session_state.page = "Tendik"
+            st.rerun()
+
+    # Dynamic CSS for sidebar navigation buttons active state
+    nav_css = []
+    if st.session_state.page == "Dashboard":
+        nav_css.append("""
+        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) button {
+            background-color: var(--accent) !important;
+            color: #ffffff !important;
+            border-color: var(--accent) !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(2) button {
+            background-color: #ffffff !important;
+            color: #475569 !important;
+            border: 1px solid #cbd5e1 !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(2) button:hover {
+            border-color: var(--accent) !important;
+            color: var(--accent) !important;
+            background-color: var(--accent-soft) !important;
+        }
+        """)
+    else:
+        nav_css.append("""
+        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(2) button {
+            background-color: var(--accent) !important;
+            color: #ffffff !important;
+            border-color: var(--accent) !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) button {
+            background-color: #ffffff !important;
+            color: #475569 !important;
+            border: 1px solid #cbd5e1 !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) button:hover {
+            border-color: var(--accent) !important;
+            color: var(--accent) !important;
+            background-color: var(--accent-soft) !important;
+        }
+        """)
+    st.sidebar.markdown('<div class="brand-divider" style="margin-top: 10px; margin-bottom: 15px;"></div>', unsafe_allow_html=True)
+
+    if st.session_state.page == "Dashboard":
+        # Render Filters
+        st.sidebar.markdown('<div class="filter-title">Filter Dashboard</div>', unsafe_allow_html=True)
+        
+        min_year = int(df["Tahun Wisuda"].min())
+        max_year = int(df["Tahun Wisuda"].max())
+        
+        with st.sidebar.expander("Tahun Wisuda", expanded=True):
+            years = st.slider("Pilih Tahun Wisuda", min_year, max_year, (min_year, max_year), label_visibility="collapsed")
+            
+        periode_options = sorted(df["Periode Wisuda"].dropna().unique().tolist(), key=lambda x: PERIODE_ORDER.get(x, 99))
+        with st.sidebar.expander("Periode Wisuda", expanded=True):
+            if "selected_periods" not in st.session_state:
+                st.session_state.selected_periods = set(periode_options)
+                
+            # Checkbox Squares timeline row
+            cols = st.columns(5)
+            roman_numerals = ["I", "II", "III", "IV", "V"]
+            circle_months = ["Feb", "Apr", "Jun", "Sep", "Nov"]
+            for idx, p_name in enumerate(periode_options[:5]):
+                is_sel = p_name in st.session_state.selected_periods
+                with cols[idx]:
+                    if st.button(roman_numerals[idx], key=f"circle_btn_{idx}", use_container_width=True):
+                         if is_sel:
+                             st.session_state.selected_periods.remove(p_name)
+                         else:
+                             st.session_state.selected_periods.add(p_name)
+                         st.rerun()
+                    st.markdown(f'<div class="circle-label" style="text-align: center; margin-top: 4px; font-weight: 600; font-size: 0.75rem; color: #64748b;">{circle_months[idx]}</div>', unsafe_allow_html=True)
+                    
+            # Generate dynamic CSS for current state
+            circle_colors = ["#0084ff", "#a855f7", "#008a50", "#fb923c", "#ef4444"]
+            
+            for idx in range(5):
+                p_name = periode_options[idx]
+                is_sel = p_name in st.session_state.selected_periods
+                
+                # Checkbox square styles
+                if is_sel:
+                    style_lines.append(f"""
+                    [data-testid="stSidebar"] details div[data-testid="column"]:nth-of-type({idx+1}) button {{
+                        background-color: {circle_colors[idx]} !important;
+                        color: #ffffff !important;
+                        border: 2px solid {circle_colors[idx]} !important;
+                    }}
+                    """)
+                else:
+                    style_lines.append(f"""
+                    [data-testid="stSidebar"] details div[data-testid="column"]:nth-of-type({idx+1}) button {{
+                        background-color: #ffffff !important;
+                        color: #475569 !important;
+                        border: 1px solid #cbd5e1 !important;
+                    }}
+                    """)
+                    
+            selected_periode = list(st.session_state.selected_periods)
+            
+        ipk_min = float(np.floor(df["IPK"].min() * 10) / 10)
+        ipk_max = float(np.ceil(df["IPK"].max() * 10) / 10)
+        with st.sidebar.expander("Rentang IPK", expanded=False):
+            ipk_range = st.slider("Pilih Rentang IPK", ipk_min, ipk_max, (ipk_min, ipk_max), step=0.01, label_visibility="collapsed")
+            
+        with st.sidebar.expander("Lama Studi (Bulan)", expanded=False):
+            st.markdown('<div class="expander-subtitle">Target Tepat Waktu:</div>', unsafe_allow_html=True)
+            target_months = st.slider("Target Tepat Waktu (bulan)", 42, 54, 54, step=1, label_visibility="collapsed")
+            st.markdown(f'<div class="expander-note">Target aktif: <b>{target_months} bulan</b>.</div>', unsafe_allow_html=True)
+
+        filtered = filter_dataframe(df, years, selected_periode, ipk_range)
+        filtered_roles = filter_roles_dataframe(role_df, years, selected_periode, ipk_range)
+
+        tabs = st.tabs(["Akademik", "Dosen", "Kemiripan Tugas Akhir"])
+        with tabs[0]:
+            academic_dashboard(filtered, target_months)
+        with tabs[1]:
+            lecturer_dashboard_from_roles(filtered_roles)
+        with tabs[2]:
+            nlp_dashboard(filtered)
+
+    else:  # Tendik page
+        tab_excel, tab_manual = st.tabs(["📁 Unggah via Excel/CSV", "✏️ Input Manual Satu-Satu"])
+        
+        if "tendik_preview_records" not in st.session_state:
+            st.session_state.tendik_preview_records = []
+            
+        with tab_excel:
+            st.markdown("### Unggah Data Berkas Excel / CSV")
+            st.markdown(
+                """
+                Pastikan berkas Excel (.xlsx, .xls) atau CSV (.csv) yang diunggah memiliki kolom dengan format berikut:
+                `NIM`, `Nama`, `Judul Tugas Akhir`, `Tanggal Lulus` (YYYY-MM-DD), `IPK`, `Lama Studi` (bulan), 
+                `Periode Wisuda` (WISUDA I s.d V), `Tahun Wisuda`, `Pembimbing 1`, `Pembimbing 2`, `Dosen Penguji 1`, `Dosen Penguji 2`, `Dosen Penguji 3`.
+                """
+            )
+            excel_file = st.file_uploader("Pilih berkas Excel atau CSV", type=["xlsx", "xls", "csv"])
+            if excel_file is not None:
+                try:
+                    if excel_file.name.endswith(".csv"):
+                        uploaded_df = pd.read_csv(excel_file)
+                    else:
+                        uploaded_df = pd.read_excel(excel_file)
+                        
+                    # Normalize columns and map them
+                    def normalize_header(h: str) -> str:
+                        h = str(h).strip().lower()
+                        h = re.sub(r'[\s_\-\(\)]+', '', h)
+                        return h
+
+                    mapped_cols = {}
+                    for col in uploaded_df.columns:
+                        norm = normalize_header(col)
+                        if "nim" in norm:
+                            mapped_cols["nim"] = col
+                        elif "nama" in norm:
+                            mapped_cols["nama"] = col
+                        elif "judul" in norm:
+                            mapped_cols["judul_ta"] = col
+                        elif "tanggal" in norm or "tgl" in norm:
+                            mapped_cols["tanggal_lulus"] = col
+                        elif "ipk" in norm:
+                            mapped_cols["ipk"] = col
+                        elif "lama" in norm:
+                            mapped_cols["lama_studi"] = col
+                        elif "periode" in norm:
+                            mapped_cols["periode_wisuda"] = col
+                        elif "tahun" in norm:
+                            mapped_cols["tahun_wisuda"] = col
+                        elif "pembimbing1" in norm or ("pembimbing" in norm and "1" in norm):
+                            mapped_cols["pembimbing_1"] = col
+                        elif "pembimbing2" in norm or ("pembimbing" in norm and "2" in norm):
+                            mapped_cols["pembimbing_2"] = col
+                        elif "penguji1" in norm or ("penguji" in norm and "1" in norm):
+                            mapped_cols["penguji_1"] = col
+                        elif "penguji2" in norm or ("penguji" in norm and "2" in norm):
+                            mapped_cols["penguji_2"] = col
+                        elif "penguji3" in norm or ("penguji" in norm and "3" in norm):
+                            mapped_cols["penguji_3"] = col
+
+                    required = ["nim", "nama", "judul_ta", "tanggal_lulus", "ipk", "lama_studi", "periode_wisuda", "tahun_wisuda"]
+                    missing = [r for r in required if r not in mapped_cols]
+                    
+                    if missing:
+                        st.error(f"Berkas kekurangan atau tidak mengenali kolom wajib: {', '.join(missing)}")
+                    else:
+                        parsed_records = []
+                        error_rows = []
+                        num_rows = len(uploaded_df)
+                        
+                        for r_idx in range(num_rows):
+                            try:
+                                # Parse NIM
+                                raw_nim = uploaded_df[mapped_cols["nim"]].iloc[r_idx]
+                                if pd.isna(raw_nim):
+                                    raise ValueError("NIM kosong")
+                                nim_str = str(raw_nim).strip()
+                                if nim_str.endswith(".0"):
+                                    nim_str = nim_str[:-2]
+                                
+                                # Parse Nama
+                                raw_nama = uploaded_df[mapped_cols["nama"]].iloc[r_idx]
+                                if pd.isna(raw_nama):
+                                    raise ValueError("Nama kosong")
+                                nama_str = str(raw_nama).strip()
+                                
+                                # Parse Judul
+                                raw_judul = uploaded_df[mapped_cols["judul_ta"]].iloc[r_idx]
+                                if pd.isna(raw_judul):
+                                    raise ValueError("Judul TA kosong")
+                                judul_str = str(raw_judul).strip()
+                                
+                                # Parse Tanggal Lulus
+                                raw_tgl = uploaded_df[mapped_cols["tanggal_lulus"]].iloc[r_idx]
+                                if pd.isna(raw_tgl):
+                                    raise ValueError("Tanggal lulus kosong")
+                                tgl_parsed = pd.to_datetime(raw_tgl)
+                                tgl_str = tgl_parsed.strftime("%Y-%m-%d")
+                                
+                                # Parse IPK
+                                raw_ipk = uploaded_df[mapped_cols["ipk"]].iloc[r_idx]
+                                if pd.isna(raw_ipk):
+                                    raise ValueError("IPK kosong")
+                                ipk_val = float(raw_ipk)
+                                if not (0.0 <= ipk_val <= 4.0):
+                                    raise ValueError(f"IPK {ipk_val} di luar rentang 0-4")
+                                    
+                                # Parse Lama Studi
+                                raw_studi = uploaded_df[mapped_cols["lama_studi"]].iloc[r_idx]
+                                if pd.isna(raw_studi):
+                                    raise ValueError("Lama studi kosong")
+                                studi_val = int(float(raw_studi))
+                                
+                                # Parse Periode Wisuda
+                                raw_periode = uploaded_df[mapped_cols["periode_wisuda"]].iloc[r_idx]
+                                if pd.isna(raw_periode):
+                                    raise ValueError("Periode wisuda kosong")
+                                periode_str = str(raw_periode).strip().upper()
+                                # Normalize Roman numerals
+                                if not periode_str.startswith("WISUDA "):
+                                    norm_p = periode_str.replace("WISUDA", "").strip()
+                                    if norm_p in ["1", "I"]:
+                                        periode_str = "WISUDA I"
+                                    elif norm_p in ["2", "II"]:
+                                        periode_str = "WISUDA II"
+                                    elif norm_p in ["3", "III"]:
+                                        periode_str = "WISUDA III"
+                                    elif norm_p in ["4", "IV"]:
+                                        periode_str = "WISUDA IV"
+                                    elif norm_p in ["5", "V"]:
+                                        periode_str = "WISUDA V"
+                                    else:
+                                        periode_str = f"WISUDA {norm_p}"
+                                
+                                # Parse Tahun Wisuda
+                                raw_tahun = uploaded_df[mapped_cols["tahun_wisuda"]].iloc[r_idx]
+                                if pd.isna(raw_tahun):
+                                    raise ValueError("Tahun wisuda kosong")
+                                tahun_val = int(float(raw_tahun))
+                                
+                                # Optional fields
+                                p1 = uploaded_df[mapped_cols["pembimbing_1"]].iloc[r_idx] if "pembimbing_1" in mapped_cols else None
+                                p2 = uploaded_df[mapped_cols["pembimbing_2"]].iloc[r_idx] if "pembimbing_2" in mapped_cols else None
+                                u1 = uploaded_df[mapped_cols["penguji_1"]].iloc[r_idx] if "penguji_1" in mapped_cols else None
+                                u2 = uploaded_df[mapped_cols["penguji_2"]].iloc[r_idx] if "penguji_2" in mapped_cols else None
+                                u3 = uploaded_df[mapped_cols["penguji_3"]].iloc[r_idx] if "penguji_3" in mapped_cols else None
+                                
+                                rec = {
+                                    "nim": nim_str,
+                                    "nama": nama_str,
+                                    "judul_ta": judul_str,
+                                    "tanggal_lulus": tgl_str,
+                                    "ipk": ipk_val,
+                                    "lama_studi": studi_val,
+                                    "periode_wisuda": periode_str,
+                                    "tahun_wisuda": tahun_val,
+                                    "pembimbing_1": str(p1).strip() if pd.notna(p1) and str(p1).strip() != "" else None,
+                                    "pembimbing_2": str(p2).strip() if pd.notna(p2) and str(p2).strip() != "" else None,
+                                    "penguji_1": str(u1).strip() if pd.notna(u1) and str(u1).strip() != "" else None,
+                                    "penguji_2": str(u2).strip() if pd.notna(u2) and str(u2).strip() != "" else None,
+                                    "penguji_3": str(u3).strip() if pd.notna(u3) and str(u3).strip() != "" else None,
+                                }
+                                parsed_records.append(rec)
+                            except Exception as row_err:
+                                error_rows.append(f"Baris {r_idx + 2}: {row_err}")
+
+                        if error_rows:
+                            with st.expander(f"⚠️ {len(error_rows)} baris dengan format tidak sesuai dilewati", expanded=False):
+                                st.write("\n".join(error_rows))
+                                
+                        if parsed_records:
+                            if st.button("Tambahkan Data Berkas ke Preview", key="btn_add_excel_to_preview", use_container_width=True):
+                                st.session_state.tendik_preview_records.extend(parsed_records)
+                                st.success(f"{len(parsed_records)} data berhasil ditambahkan ke preview!")
+                                st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal membaca berkas: {e}")
+                    
+        with tab_manual:
+            st.markdown("### Formulir Input Manual Alumni")
+            with st.form("form_manual_input", clear_on_submit=True):
+                col_form1, col_form2 = st.columns(2)
+                with col_form1:
+                    m_nim = st.text_input("NIM *", placeholder="Contoh: 2011521001")
+                    m_nama = st.text_input("Nama Lengkap *", placeholder="Contoh: Fitrah Annisa Sari")
+                    m_judul = st.text_area("Judul Tugas Akhir *", placeholder="Tuliskan judul tugas akhir lengkap...")
+                    m_tgl = st.date_input("Tanggal Lulus *", value=datetime.date.today())
+                with col_form2:
+                    m_ipk = st.number_input("IPK Lulus *", min_value=0.0, max_value=4.0, value=3.5, step=0.01)
+                    m_studi = st.number_input("Lama Studi (Bulan) *", min_value=1, max_value=120, value=48, step=1)
+                    m_periode = st.selectbox("Periode Wisuda *", ["WISUDA I", "WISUDA II", "WISUDA III", "WISUDA IV", "WISUDA V"])
+                    m_tahun = st.number_input("Tahun Wisuda *", min_value=2010, max_value=2050, value=datetime.date.today().year, step=1)
+                    
+                st.markdown("**Peran Dosen (Opsional)**")
+                col_dosen1, col_dosen2 = st.columns(2)
+                with col_dosen1:
+                    m_pem1 = st.text_input("Dosen Pembimbing 1")
+                    m_pem2 = st.text_input("Dosen Pembimbing 2")
+                    m_peng1 = st.text_input("Dosen Penguji 1")
+                with col_dosen2:
+                    m_peng2 = st.text_input("Dosen Penguji 2")
+                    m_peng3 = st.text_input("Dosen Penguji 3")
+                    
+                submit_manual = st.form_submit_button("Tambahkan ke Preview", use_container_width=True)
+                if submit_manual:
+                    if not m_nim.strip() or not m_nama.strip() or not m_judul.strip():
+                        st.error("NIM, Nama Lengkap, dan Judul Tugas Akhir wajib diisi!")
+                    else:
+                        new_rec = {
+                            "nim": m_nim.strip(),
+                            "nama": m_nama.strip(),
+                            "judul_ta": m_judul.strip(),
+                            "tanggal_lulus": str(m_tgl),
+                            "ipk": float(m_ipk),
+                            "lama_studi": int(m_studi),
+                            "periode_wisuda": m_periode.upper(),
+                            "tahun_wisuda": int(m_tahun),
+                            "pembimbing_1": m_pem1.strip() if m_pem1.strip() else None,
+                            "pembimbing_2": m_pem2.strip() if m_pem2.strip() else None,
+                            "penguji_1": m_peng1.strip() if m_peng1.strip() else None,
+                            "penguji_2": m_peng2.strip() if m_peng2.strip() else None,
+                            "penguji_3": m_peng3.strip() if m_peng3.strip() else None,
+                        }
+                        st.session_state.tendik_preview_records.append(new_rec)
+                        st.toast("Data ditambahkan ke preview!", icon="✏️")
+                        st.rerun()
+
+        # Preview Section
+        st.markdown("---")
+        st.markdown("### Preview Data Baru")
+        
+        if st.session_state.tendik_preview_records:
+            preview_df = pd.DataFrame(st.session_state.tendik_preview_records)
+            st.dataframe(preview_df, use_container_width=True)
+            
+            col_act1, col_act2 = st.columns([1, 4])
+            with col_act1:
+                if st.button("🗑️ Hapus Semua Preview", key="btn_clear_preview", use_container_width=True):
+                    st.session_state.tendik_preview_records = []
+                    st.rerun()
+            with col_act2:
+                if st.button("💾 Simpan Permanen ke Database PostgreSQL", key="btn_save_to_db", use_container_width=True):
+                    with st.spinner("Menyimpan ke PostgreSQL..."):
+                        success, message = save_records_to_db(st.session_state.tendik_preview_records)
+                        if success:
+                            st.success(message)
+                            st.session_state.tendik_preview_records = []
+                            st.cache_data.clear()
+                        else:
+                            st.error(f"Gagal menyimpan ke database: {message}")
+        else:
+            st.info("Belum ada data baru di preview. Silakan masukkan data manual atau unggah Excel di atas.")    # Render all dynamic CSS at the root level of the page
+    all_dynamic_css = []
+    if 'nav_css' in locals() and nav_css:
+        all_dynamic_css.extend(nav_css)
+    if 'style_lines' in locals() and style_lines:
+        all_dynamic_css.extend(style_lines)
+        
+    if all_dynamic_css:
+        st.markdown(f"<style>{''.join(all_dynamic_css)}</style>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

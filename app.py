@@ -2194,14 +2194,13 @@ def academic_dashboard(df: pd.DataFrame, target_months: int, target_ipk: float) 
         )
 
     st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
-    insights, recommendations = build_academic_insights(df, target_months, target_ipk)
-    render_dynamic_panels(insights, recommendations)
-    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
     if df.empty:
         fig_empty = plot_empty("Tidak ada data pada filter ini.")
         style_plotly_fig(fig_empty)
         st.plotly_chart(fig_empty, use_container_width=True, config={'displayModeBar': False})
+        insights, recommendations = build_academic_insights(df, target_months, target_ipk)
+        render_dynamic_panels(insights, recommendations)
         return
 
     yearly = (
@@ -2215,7 +2214,7 @@ def academic_dashboard(df: pd.DataFrame, target_months: int, target_ipk: float) 
         .agg(jumlah_lulusan=("NO", "count"), rata_ipk=("IPK", "mean"))
         .sort_values(["Tahun Wisuda", "Periode Num"])
     )
-    period["label"] = period["Tahun Wisuda"].astype(str) + " " + period["Periode Wisuda"].str.replace("WISUDA ", "W")
+    period["label"] = period["Tahun Wisuda"].astype(str) + " " + period["Periode Wisuda"].str.replace("WISUDA ", "W", regex=False)
 
     col_left, col_right = st.columns([1.35, 1])
     with col_left:
@@ -2403,6 +2402,10 @@ def academic_dashboard(df: pd.DataFrame, target_months: int, target_ipk: float) 
             hide_index=True,
         )
 
+    st.markdown('<div style="height: 16px;"></div>', unsafe_allow_html=True)
+    insights, recommendations = build_academic_insights(df, target_months, target_ipk)
+    render_dynamic_panels(insights, recommendations)
+
 
 
 def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
@@ -2478,9 +2481,9 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
 
 def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
     if role_df.empty:
+        st.info("Tidak ada data peran dosen pada filter ini.")
         insights, recommendations = build_lecturer_insights(role_df)
         render_dynamic_panels(insights, recommendations)
-        st.info("Tidak ada data peran dosen pada filter ini.")
         return
 
     total_roles = int(role_df["role_count"].sum())
@@ -2488,6 +2491,7 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
     unique_lecturers = role_df["dosen_key"].nunique()
     advisor_roles = int(role_df.loc[role_df["jenis_peran"].eq("Pembimbing"), "role_count"].sum())
     examiner_roles = int(role_df.loc[role_df["jenis_peran"].eq("Penguji"), "role_count"].sum())
+    # NOTE: insights & recommendations will be rendered at the bottom of the function
 
     # Render custom HTML KPI Cards
     kpi_cols = st.columns(4)
@@ -2584,9 +2588,6 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
         )
 
     st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
-    insights, recommendations = build_lecturer_insights(role_df)
-    render_dynamic_panels(insights, recommendations)
-    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
     top_all = (
         role_df.groupby(["dosen_key", "nama_dosen_normalized"], as_index=False)
@@ -2599,34 +2600,115 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
         .agg(jumlah=("role_count", "sum"))
         .sort_values("jumlah", ascending=False)
     )
-    top_role_chart = top_role[top_role["dosen_key"].isin(top_all["dosen_key"])].merge(
-        top_all[["dosen_key", "jumlah_peran"]], on="dosen_key", how="left"
+
+    # --- Build scatter-quadrant data: x=jumlah pembimbing, y=jumlah penguji per dosen ---
+    # Only include top_all dosen to avoid NaN after merge
+    top_role_top = top_role[top_role["dosen_key"].isin(top_all["dosen_key"])].copy()
+    pivot_scatter = top_role_top.pivot_table(
+        index=["dosen_key", "nama_dosen_normalized"],
+        columns="jenis_peran",
+        values="jumlah",
+        fill_value=0,
+        aggfunc="sum",
+    ).reset_index()
+    # Flatten potential MultiIndex columns
+    pivot_scatter.columns = [
+        col if isinstance(col, str) else col for col in pivot_scatter.columns
+    ]
+    if "Pembimbing" not in pivot_scatter.columns:
+        pivot_scatter["Pembimbing"] = 0
+    if "Penguji" not in pivot_scatter.columns:
+        pivot_scatter["Penguji"] = 0
+    pivot_scatter = pivot_scatter.merge(
+        top_all[["dosen_key", "jumlah_peran", "jumlah_alumni"]], on="dosen_key", how="inner"
     )
+    pivot_scatter["jumlah_peran"] = pivot_scatter["jumlah_peran"].fillna(0)
+    pivot_scatter["jumlah_alumni"] = pivot_scatter["jumlah_alumni"].fillna(0)
+
+    mean_pembimbing = float(pivot_scatter["Pembimbing"].mean()) if not pivot_scatter.empty else 0.0
+    mean_penguji = float(pivot_scatter["Penguji"].mean()) if not pivot_scatter.empty else 0.0
+    x_max = float(pivot_scatter["Pembimbing"].max()) * 1.1 if not pivot_scatter.empty else 10.0
+    y_max = float(pivot_scatter["Penguji"].max()) * 1.1 if not pivot_scatter.empty else 10.0
+    # Safe quadrant label Y positions - avoid zero
+    q_y_top = y_max * 0.92 if y_max > 0 else 1.0
+    q_y_bot = max(mean_penguji * 0.3, 0.2) if mean_penguji > 0 else 0.2
+    q_x_left = mean_pembimbing * 0.5 if mean_pembimbing > 0 else 0.1
+    q_x_right = x_max * 0.8 if x_max > 0 else 1.0
 
     col_left, col_right = st.columns([1.2, 1])
     with col_left:
         with st.container(border=True):
-            fig = px.bar(
-                top_role_chart.sort_values("jumlah_peran"),
-                x="jumlah",
-                y="nama_dosen_normalized",
-                color="jenis_peran",
-                orientation="h",
-                title="Top Dosen Berdasarkan Total Relasi Peran",
-                labels={"jumlah": "Jumlah Peran", "nama_dosen_normalized": "Dosen", "jenis_peran": "Jenis Peran"},
-                color_discrete_map={"Pembimbing": "#114b36", "Penguji": "#d4a373"},
+            fig = px.scatter(
+                pivot_scatter,
+                x="Pembimbing",
+                y="Penguji",
+                text="nama_dosen_normalized",
+                size="jumlah_peran",
+                size_max=28,
+                color="jumlah_peran",
+                color_continuous_scale=["#b8c5a3", "#4f7f70", "#114b36"],
+                title="Peta Peran Dosen: Pembimbing vs Penguji (Scatter Kuadran)",
+                labels={
+                    "Pembimbing": "Jumlah Peran Pembimbing",
+                    "Penguji": "Jumlah Peran Penguji",
+                    "jumlah_peran": "Total Peran",
+                    "nama_dosen_normalized": "Dosen",
+                },
+                hover_data={"nama_dosen_normalized": True, "Pembimbing": True, "Penguji": True, "jumlah_alumni": True},
             )
-            try:
-                fig.update_layout(barcornerradius=6)
-            except Exception:
-                pass
-            style_plotly_fig(fig)
+            fig.update_traces(
+                textposition="top center",
+                textfont=dict(size=8, color="#1c2826"),
+                marker=dict(opacity=0.85, line=dict(width=1, color="#ffffff")),
+            )
+            # Override hovertemplate - customdata order from hover_data dict:
+            # hover_data cols not in x/y: [nama_dosen_normalized, jumlah_alumni]
+            # so customdata[0]=nama_dosen_normalized, customdata[1]=jumlah_alumni
+            fig.update_traces(
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b><br>"
+                    "Peran Pembimbing: %{x}<br>"
+                    "Peran Penguji: %{y}<br>"
+                    "Alumni Unik: %{customdata[1]}<extra></extra>"
+                )
+            )
+            # Quadrant lines at mean
+            fig.add_vline(
+                x=mean_pembimbing,
+                line_dash="dash",
+                line_color="#1f644e",
+                line_width=1.5,
+                annotation_text=f"Rata-rata Pem. ({mean_pembimbing:.1f})",
+                annotation_position="top right",
+                annotation_font=dict(size=10, color="#1f644e"),
+            )
+            fig.add_hline(
+                y=mean_penguji,
+                line_dash="dash",
+                line_color="#b87333",
+                line_width=1.5,
+                annotation_text=f"Rata-rata Penguji ({mean_penguji:.1f})",
+                annotation_position="bottom right",
+                annotation_font=dict(size=10, color="#b87333"),
+            )
+            # Quadrant labels (safe positions)
+            quadrant_annotations = [
+                dict(x=q_x_left, y=q_y_top, text="🔵 Lebih banyak menguji", showarrow=False,
+                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
+                dict(x=q_x_right, y=q_y_top, text="⭐ Dominan di keduanya", showarrow=False,
+                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
+                dict(x=q_x_left, y=q_y_bot, text="⚪ Beban rendah", showarrow=False,
+                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
+                dict(x=q_x_right, y=q_y_bot, text="🟢 Lebih banyak membimbing", showarrow=False,
+                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
+            ]
             fig.update_layout(
+                annotations=list(fig.layout.annotations) + quadrant_annotations,
                 height=520,
                 margin=dict(l=10, r=10, t=55, b=10),
-                barmode="stack",
-                yaxis={"categoryorder": "total ascending"},
+                coloraxis_showscale=False,
             )
+            style_plotly_fig(fig)
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with col_right:
@@ -2642,30 +2724,35 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
                 .agg(jumlah=("role_count", "sum"))
                 .merge(top_all[["dosen_key", "jumlah_peran"]], on="dosen_key", how="left")
             )
-            fig = px.bar(
-                advisor_position.sort_values("jumlah_peran"),
-                x="jumlah",
-                y="nama_dosen_normalized",
-                color="Posisi",
-                orientation="h",
-                title="Distribusi Dosen Pembimbing 1 dan 2",
-                labels={
-                    "jumlah": "Jumlah Relasi Pembimbing",
-                    "nama_dosen_normalized": "Dosen",
-                    "Posisi": "Posisi Pembimbing",
-                },
-                color_discrete_map={"Pembimbing 1": "#114b36", "Pembimbing 2": "#5b7894"},
-            )
+            # Build grouped (not stacked) horizontal bar with value labels
+            advisor_sorted = advisor_position.sort_values(["jumlah_peran", "Posisi"], ascending=[True, True])
+            fig = go.Figure()
+            colors = {"Pembimbing 1": "#114b36", "Pembimbing 2": "#5b7894"}
+            for posisi in ["Pembimbing 1", "Pembimbing 2"]:
+                subset = advisor_sorted[advisor_sorted["Posisi"] == posisi]
+                fig.add_trace(go.Bar(
+                    name=posisi,
+                    x=subset["jumlah"],
+                    y=subset["nama_dosen_normalized"],
+                    orientation="h",
+                    marker_color=colors.get(posisi, "#114b36"),
+                    text=subset["jumlah"].astype(int).astype(str),
+                    textposition="outside",
+                    textfont=dict(size=10, color="#1c2826"),
+                    hovertemplate="<b>%{y}</b><br>" + posisi + ": %{x}<extra></extra>",
+                ))
             try:
-                fig.update_layout(barcornerradius=6)
+                fig.update_layout(barcornerradius=5)
             except Exception:
                 pass
             style_plotly_fig(fig)
             fig.update_layout(
+                title="Distribusi Dosen Pembimbing 1 dan 2",
                 height=520,
-                margin=dict(l=10, r=10, t=55, b=10),
-                barmode="stack",
+                margin=dict(l=10, r=60, t=55, b=10),
+                barmode="group",
                 yaxis={"categoryorder": "total ascending"},
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
@@ -2699,6 +2786,10 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
         use_container_width=True,
         hide_index=True,
     )
+
+    st.markdown('<div style="height: 16px;"></div>', unsafe_allow_html=True)
+    insights, recommendations = build_lecturer_insights(role_df)
+    render_dynamic_panels(insights, recommendations)
 
 
 def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
@@ -2814,11 +2905,6 @@ def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
         )
 
     st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
-    insights, recommendations = build_nlp_insights(df_nlp, target_months)
-    render_dynamic_panels(insights, recommendations)
-    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
-
-
 
     col_left, col_right = st.columns([1.2, 1])
     with col_left:
@@ -2923,6 +3009,10 @@ def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
         ]
     ].head(25)
     st.dataframe(top_pairs.style.format({"skor_kemiripan_tertinggi": "{:.4f}"}), use_container_width=True, hide_index=True)
+
+    st.markdown('<div style="height: 16px;"></div>', unsafe_allow_html=True)
+    insights, recommendations = build_nlp_insights(df_nlp, target_months)
+    render_dynamic_panels(insights, recommendations)
 
 
 def star_schema_dashboard(schema: StarSchema) -> None:

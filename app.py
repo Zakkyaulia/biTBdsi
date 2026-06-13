@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import datetime
+import html
 import os
 import re
 import unicodedata
@@ -15,6 +16,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import psycopg
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,6 +35,15 @@ PERIODE_ORDER = {
     "WISUDA V": 5,
     "WISUDA VI": 6,
 }
+
+PERIODE_FILTER_OPTIONS = [
+    ("WISUDA I", "I", "", "#1f644e"),
+    ("WISUDA II", "II", "", "#1f644e"),
+    ("WISUDA III", "III", "", "#1f644e"),
+    ("WISUDA IV", "IV", "", "#1f644e"),
+    ("WISUDA V", "V", "", "#1f644e"),
+    ("WISUDA VI", "VI", "", "#1f644e"),
+]
 
 MONTH_MAP = {
     "januari": "January",
@@ -131,6 +142,8 @@ def inject_css() -> None:
             /* Sidebar-specific colors */
             --sidebar-text: #1c2826;
             --sidebar-muted: #5e6b66;
+            --sidebar-min-width: 300px;
+            --sidebar-max-width: 420px;
         }
 
         /* Typography & Globals */
@@ -259,6 +272,36 @@ def inject_css() -> None:
         [data-testid="stSidebar"] {
             background-color: var(--panel) !important;
             border-right: 1px solid #b4c5be !important;
+            min-width: min(var(--sidebar-min-width), calc(100vw - 48px)) !important;
+            max-width: min(var(--sidebar-max-width), calc(100vw - 48px)) !important;
+            flex-shrink: 0 !important;
+            overflow-x: hidden !important;
+        }
+        [data-testid="stSidebar"] > div:first-child,
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+            min-width: min(var(--sidebar-min-width), calc(100vw - 48px)) !important;
+            max-width: min(var(--sidebar-max-width), calc(100vw - 48px)) !important;
+            overflow-x: hidden !important;
+        }
+        [data-testid="stSidebar"] * {
+            box-sizing: border-box !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"],
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"],
+        [data-testid="stSidebar"] [data-testid="column"],
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+        [data-testid="stSidebar"] [data-testid="stButton"],
+        [data-testid="stSidebar"] [data-testid="stExpander"],
+        [data-testid="stSidebar"] details,
+        [data-testid="stSidebar"] summary {
+            min-width: 0 !important;
+            max-width: 100% !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] summary {
+            overflow-wrap: break-word !important;
         }
 
         /* Typography & Layout for Sidebar Custom Brand elements */
@@ -269,6 +312,8 @@ def inject_css() -> None:
             margin-bottom: 6px !important;
             margin-right: 48px !important; /* Prevent overlap with collapse control */
             font-family: 'Outfit', sans-serif !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
         }
         .logo-box {
             background: linear-gradient(135deg, #114b36, #0b3626) !important;
@@ -288,11 +333,14 @@ def inject_css() -> None:
         .brand-logo-img {
             height: 38px !important;
             width: auto !important;
+            max-width: 48px !important;
             object-fit: contain !important;
+            flex: 0 0 auto !important;
         }
         .brand-text {
             display: flex !important;
             flex-direction: column !important;
+            min-width: 0 !important;
         }
         .brand-title {
             font-size: 1.35rem !important;
@@ -300,11 +348,19 @@ def inject_css() -> None:
             color: #1c2826 !important;
             letter-spacing: 0.5px !important;
             line-height: 1.1 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         .brand-subtitle {
             font-size: 0.8rem !important;
             color: #5e6b66 !important;
             font-weight: 500 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         .brand-org {
             font-size: 0.85rem !important;
@@ -312,6 +368,9 @@ def inject_css() -> None:
             margin-left: 2px !important;
             margin-bottom: 16px !important;
             font-family: 'Inter', sans-serif !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         .brand-divider {
             margin-top: -8px !important;
@@ -327,12 +386,16 @@ def inject_css() -> None:
             padding: 16px !important;
             box-shadow: 0 2px 8px rgba(0,0,0,0.02) !important;
             margin-bottom: 16px !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
         }
         .card-header {
             display: flex !important;
             align-items: center !important;
             gap: 8px !important;
             margin-bottom: 12px !important;
+            min-width: 0 !important;
         }
         .db-icon {
             stroke: #114b36 !important;
@@ -342,12 +405,17 @@ def inject_css() -> None:
             font-weight: 700 !important;
             font-size: 1.05rem !important;
             color: #1c2826 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         .card-row {
             display: flex !important;
             justify-content: space-between !important;
             align-items: center !important;
+            gap: 10px !important;
             margin-bottom: 8px !important;
+            min-width: 0 !important;
         }
         .card-row-stack {
             display: flex !important;
@@ -359,6 +427,10 @@ def inject_css() -> None:
             font-size: 0.88rem !important;
             color: #5e6b66 !important;
             font-weight: 500 !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         .status-badge {
             display: inline-flex !important;
@@ -370,6 +442,11 @@ def inject_css() -> None:
             border-radius: 20px !important;
             font-size: 0.8rem !important;
             font-weight: 600 !important;
+            flex: 0 1 auto !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         .status-badge .dot {
             width: 8px !important;
@@ -382,6 +459,10 @@ def inject_css() -> None:
             font-size: 0.95rem !important;
             font-weight: 700 !important;
             color: #1c2826 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
 
         /* Style the Sync Data button inside the card container specifically */
@@ -401,6 +482,11 @@ def inject_css() -> None:
             box-shadow: 0 4px 6px rgba(17, 75, 54, 0.1) !important;
             transition: all 0.2s ease !important;
             margin: 12px 0 0 0 !important; /* No negative margins! */
+            min-width: 0 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         [data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] button:hover {
             background-color: #0b3626 !important;
@@ -419,6 +505,9 @@ def inject_css() -> None:
             color: #1c2826 !important;
             margin-top: 10px !important;
             margin-bottom: 12px !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
 
         /* Custom Expander Dropdowns in Sidebar */
@@ -429,6 +518,7 @@ def inject_css() -> None:
             box-shadow: 0 2px 4px rgba(0,0,0,0.01) !important;
             margin-bottom: 10px !important;
             overflow: hidden !important;
+            max-width: 100% !important;
         }
         [data-testid="stSidebar"] [data-testid="stExpander"] details {
             border: none !important;
@@ -439,6 +529,10 @@ def inject_css() -> None:
             font-weight: 600 !important;
             color: #1c2826 !important;
             background-color: transparent !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
             color: var(--accent) !important;
@@ -457,6 +551,8 @@ def inject_css() -> None:
             font-size: 0.78rem !important;
             color: #5e6b66 !important;
             margin-top: 8px !important;
+            max-width: 100% !important;
+            overflow-wrap: anywhere !important;
         }
 
         /* Text and Inputs in Sidebar */
@@ -480,11 +576,16 @@ def inject_css() -> None:
             color: #1c2826 !important;
             border: 1px solid #b4c5be !important;
             border-radius: 6px !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
         }
         div[data-baseweb="tag"] span,
         [data-testid="stSidebar"] div[data-baseweb="tag"] span {
             color: #1c2826 !important;
             font-weight: 500 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
         
         /* Sliders in Sidebar */
@@ -510,6 +611,11 @@ def inject_css() -> None:
             padding: 8px 16px !important;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
             margin-bottom: 12px !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
         }
 
         /* 2. Circle timeline container and labels */
@@ -520,17 +626,33 @@ def inject_css() -> None:
             color: #64748b !important;
             margin-top: 4px !important;
             margin-bottom: 12px !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+        }
+
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] {
+            gap: 4px !important;
+        }
+
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"],
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] {
+            min-width: 0 !important;
         }
 
         /* Checkbox square button standard dimensions */
-        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button {
+        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button,
+        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] button,
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button,
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] button {
             border-radius: 8px !important;
-            width: 44px !important;
-            height: 44px !important;
-            min-width: 44px !important;
+            width: 100% !important;
+            height: auto !important;
+            min-width: 0 !important;
             max-width: 44px !important;
-            min-height: 44px !important;
+            min-height: 36px !important;
             max-height: 44px !important;
+            aspect-ratio: 1 / 1 !important;
             padding: 0 !important;
             display: flex !important;
             align-items: center !important;
@@ -546,10 +668,42 @@ def inject_css() -> None:
         }
 
         /* Prevent Period Wisuda Roman numerals text from wrapping */
-        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button p {
+        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button p,
+        div[data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] button p,
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="column"] button p,
+        [data-testid="stSidebar"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] button p {
             white-space: nowrap !important;
             margin: 0 !important;
             padding: 0 !important;
+            width: auto !important;
+            max-width: none !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+
+        [data-testid="stSidebar"] button,
+        [data-testid="stSidebar"] button p,
+        [data-testid="stSidebar"] button span {
+            min-width: 0 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+        }
+
+        [data-testid="stSidebar"][aria-expanded="false"],
+        [data-testid="stSidebar"][aria-hidden="true"] {
+            min-width: 0 !important;
+            max-width: 0 !important;
+            border-right: 0 !important;
+            overflow: hidden !important;
+        }
+
+        @media (max-width: 640px) {
+            :root {
+                --sidebar-min-width: 248px;
+                --sidebar-max-width: 88vw;
+            }
         }
 
         /* Style all main primary action buttons green */
@@ -785,6 +939,77 @@ def inject_css() -> None:
             margin-bottom: 1.25rem !important;
         }
 
+        .insight-panel-title {
+            color: var(--ink) !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 1.05rem !important;
+            font-weight: 800 !important;
+            margin: 0 0 0.85rem 0 !important;
+        }
+        .insight-list {
+            display: grid !important;
+            gap: 0.72rem !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            list-style: none !important;
+        }
+        .insight-item {
+            color: var(--ink) !important;
+            font-size: 0.9rem !important;
+            line-height: 1.48 !important;
+            padding-left: 1rem !important;
+            position: relative !important;
+        }
+        .insight-item::before {
+            content: "" !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0.58rem !important;
+            width: 6px !important;
+            height: 6px !important;
+            border-radius: 999px !important;
+            background-color: var(--accent) !important;
+        }
+
+        .audit-summary-grid {
+            display: grid !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+            margin: 6px 0 14px 0 !important;
+        }
+        .audit-summary-card {
+            background-color: #ffffff !important;
+            border: 1px solid #eef1ed !important;
+            border-radius: 10px !important;
+            padding: 12px 14px !important;
+        }
+        .audit-summary-label {
+            color: var(--muted) !important;
+            font-size: 0.78rem !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.02em !important;
+            margin-bottom: 6px !important;
+        }
+        .audit-summary-value {
+            color: var(--ink) !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 1.35rem !important;
+            font-weight: 800 !important;
+            line-height: 1 !important;
+        }
+        .audit-toolbar-note {
+            color: var(--muted) !important;
+            font-size: 0.86rem !important;
+            margin: -4px 0 10px 0 !important;
+        }
+
+        @media (max-width: 900px) {
+            .audit-summary-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+        }
+
         .schema-box {
             background-color: #ffffff !important;
             border: 1px solid #eef1ed !important;
@@ -825,9 +1050,293 @@ def inject_css() -> None:
             border: 1px solid #c8d9cc !important;
             margin-bottom: 1rem !important;
         }
+
+        .main div[data-testid="stFormSubmitButton"] button {
+            background-color: var(--accent) !important;
+            color: #ffffff !important;
+            border: 1px solid var(--accent) !important;
+            border-radius: 8px !important;
+            width: 100% !important;
+            min-height: 44px !important;
+            font-weight: 700 !important;
+            font-size: 1rem !important;
+            box-shadow: 0 6px 14px rgba(17, 75, 54, 0.18) !important;
+            cursor: pointer !important;
+            transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease !important;
+        }
+        .main div[data-testid="stFormSubmitButton"] button:hover {
+            background-color: #0b3626 !important;
+            border-color: #0b3626 !important;
+            box-shadow: 0 8px 18px rgba(17, 75, 54, 0.26) !important;
+            transform: translateY(-1px) !important;
+        }
+        .main div[data-testid="stFormSubmitButton"] button:active {
+            transform: translateY(0) !important;
+            box-shadow: 0 4px 10px rgba(17, 75, 54, 0.16) !important;
+        }
+        .main div[data-testid="stFormSubmitButton"] button:disabled,
+        .main div[data-testid="stFormSubmitButton"] button[disabled] {
+            background-color: #c8d9cc !important;
+            color: #5e6b66 !important;
+            border-color: #c8d9cc !important;
+            box-shadow: none !important;
+            cursor: not-allowed !important;
+            transform: none !important;
+            opacity: 0.75 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def inject_sidebar_resize_guard() -> None:
+    components.html(
+        """
+        <script>
+        (() => {
+            const MIN_WIDTH = 300;
+            const MAX_WIDTH = 420;
+
+            const getSidebar = () => parent.document.querySelector('[data-testid="stSidebar"]');
+
+            const clampSidebar = () => {
+                const sidebar = getSidebar();
+                if (!sidebar || sidebar.getAttribute('aria-expanded') === 'false') {
+                    return;
+                }
+
+                const currentWidth = parseFloat(sidebar.style.width || sidebar.getBoundingClientRect().width);
+                if (!Number.isFinite(currentWidth)) {
+                    return;
+                }
+
+                const clampedWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, currentWidth));
+                if (Math.abs(currentWidth - clampedWidth) > 0.5) {
+                    sidebar.style.width = `${clampedWidth}px`;
+                }
+            };
+
+            const install = () => {
+                const sidebar = getSidebar();
+                if (!sidebar) {
+                    parent.requestAnimationFrame(install);
+                    return;
+                }
+
+                clampSidebar();
+                new parent.ResizeObserver(clampSidebar).observe(sidebar);
+                parent.window.addEventListener('resize', clampSidebar, { passive: true });
+                parent.document.addEventListener('mouseup', clampSidebar, true);
+                parent.document.addEventListener('touchend', clampSidebar, true);
+            };
+
+            install();
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def inject_manual_form_input_guard() -> None:
+    components.html(
+        """
+        <script>
+        (() => {
+            const FIELD_RULES = [
+                {
+                    labels: ["NIM *"],
+                    inputMode: "numeric",
+                    maxLength: 10,
+                    filter: (value) => value.replace(/\\D/g, "").slice(0, 10),
+                },
+                {
+                    labels: ["IPK Lulus *"],
+                    inputMode: "decimal",
+                    maxLength: 4,
+                    filter: (value, previous) => {
+                        let next = value.replace(/[^0-9.,]/g, "");
+                        const firstSeparator = next.search(/[.,]/);
+                        if (firstSeparator !== -1) {
+                            const head = next.slice(0, firstSeparator + 1);
+                            const tail = next.slice(firstSeparator + 1).replace(/[.,]/g, "");
+                            next = head + tail;
+                        }
+                        next = next.replace(/^([0-9])([0-9])/, "$1");
+                        next = next.replace(/^([0-9][.,][0-9]{0,2}).*$/, "$1");
+                        if (/^[5-9]/.test(next)) {
+                            return previous || "";
+                        }
+                        const numeric = Number(next.replace(",", "."));
+                        if (Number.isFinite(numeric) && numeric > 4) {
+                            return previous || "4";
+                        }
+                        return next;
+                    },
+                },
+                {
+                    labels: ["Lama Studi (Bulan) *"],
+                    inputMode: "numeric",
+                    maxLength: 3,
+                    filter: (value) => value.replace(/\\D/g, "").slice(0, 3),
+                },
+                {
+                    labels: ["Tahun Wisuda *"],
+                    inputMode: "numeric",
+                    maxLength: 4,
+                    filter: (value) => value.replace(/\\D/g, "").slice(0, 4),
+                },
+                {
+                    labels: ["Nama Lengkap *"],
+                    inputMode: "text",
+                    maxLength: 120,
+                    filter: (value) => value.replace(/[^\\p{L}\\s.',-]/gu, "").replace(/\\s{2,}/g, " ").slice(0, 120),
+                },
+            ];
+
+            const setNativeValue = (input, value) => {
+                if (input.value === value) {
+                    return;
+                }
+                const prototype = input instanceof parent.HTMLTextAreaElement
+                    ? parent.HTMLTextAreaElement.prototype
+                    : parent.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+                setter.call(input, value);
+                input.dispatchEvent(new parent.Event("input", { bubbles: true }));
+            };
+
+            const labelMatches = (input, labels) => {
+                const aria = input.getAttribute("aria-label") || "";
+                return labels.some((label) => aria === label || aria.endsWith(` ${label}`));
+            };
+
+            const isVisible = (element) => {
+                if (!element || element.disabled || element.getAttribute("aria-disabled") === "true") {
+                    return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = parent.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            };
+
+            const isManualField = (element) => {
+                const aria = element.getAttribute("aria-label") || "";
+                const manualFormVisible = parent.document.body.innerText.includes("Formulir Input Manual Alumni");
+                if (manualFormVisible && aria === "Select a date.") {
+                    return true;
+                }
+                const manualLabels = [
+                    "NIM *",
+                    "Nama Lengkap *",
+                    "Judul Tugas Akhir *",
+                    "Tanggal Lulus *",
+                    "IPK Lulus *",
+                    "Lama Studi (Bulan) *",
+                    "Periode Wisuda *",
+                    "Tahun Wisuda *",
+                    "Dosen Pembimbing 1",
+                    "Dosen Pembimbing 2",
+                    "Dosen Penguji 1",
+                    "Dosen Penguji 2",
+                    "Dosen Penguji 3",
+                ];
+                return manualLabels.some((label) => aria === label || aria.includes(label));
+            };
+
+            const getManualFields = () => {
+                const fields = [...parent.document.querySelectorAll("input, textarea, [role='combobox']")]
+                    .filter((element) => isVisible(element) && isManualField(element));
+                return fields.filter((field, index, list) => list.indexOf(field) === index);
+            };
+
+            const focusNextManualField = (current) => {
+                const fields = getManualFields();
+                const currentIndex = fields.indexOf(current);
+                const nextField = fields.slice(currentIndex + 1).find(isVisible);
+                if (nextField) {
+                    nextField.focus();
+                    if (typeof nextField.select === "function" && nextField.tagName !== "TEXTAREA") {
+                        nextField.select();
+                    }
+                }
+            };
+
+            const bindEnterNavigation = (input) => {
+                if (input.dataset.manualEnterNav === "1") {
+                    return;
+                }
+                input.dataset.manualEnterNav = "1";
+                input.addEventListener("keydown", (event) => {
+                    if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+                        return;
+                    }
+                    if (input.tagName === "TEXTAREA") {
+                        return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    focusNextManualField(input);
+                }, true);
+            };
+
+            const bindInput = (input, rule) => {
+                if (input.dataset.manualGuard === "1") {
+                    return;
+                }
+                input.dataset.manualGuard = "1";
+                input.setAttribute("inputmode", rule.inputMode);
+                input.setAttribute("autocomplete", "off");
+                if (rule.maxLength) {
+                    input.setAttribute("maxlength", String(rule.maxLength));
+                }
+
+                const applyFilter = () => {
+                    const previous = input.dataset.lastValidValue || "";
+                    const filtered = rule.filter(input.value, previous);
+                    setNativeValue(input, filtered);
+                    input.dataset.lastValidValue = filtered;
+                };
+
+                input.addEventListener("beforeinput", (event) => {
+                    if (!event.data) {
+                        return;
+                    }
+                    const start = input.selectionStart ?? input.value.length;
+                    const end = input.selectionEnd ?? start;
+                    const proposed = input.value.slice(0, start) + event.data + input.value.slice(end);
+                    const previous = input.dataset.lastValidValue || input.value;
+                    if (rule.filter(proposed, previous) !== proposed) {
+                        event.preventDefault();
+                    }
+                });
+                input.addEventListener("input", applyFilter);
+                input.addEventListener("paste", () => parent.requestAnimationFrame(applyFilter));
+                applyFilter();
+            };
+
+            const install = () => {
+                const inputs = [...parent.document.querySelectorAll("input, textarea, [role='combobox']")];
+                for (const input of inputs) {
+                    if (isManualField(input)) {
+                        bindEnterNavigation(input);
+                    }
+                    const rule = FIELD_RULES.find((candidate) => labelMatches(input, candidate.labels));
+                    if (rule) {
+                        bindInput(input, rule);
+                    }
+                }
+            };
+
+            install();
+            new parent.MutationObserver(install).observe(parent.document.body, { childList: true, subtree: true });
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 
@@ -883,6 +1392,75 @@ def final_title(text: object) -> str:
     tokens = clean_title(text).split()
     filtered = [token for token in tokens if token not in STOPWORDS_UNAND]
     return " ".join(filtered)
+
+
+def display_person_name(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    return " ".join(part.capitalize() for part in text.split())
+
+
+def get_lecturer_options(dim_dosen: pd.DataFrame) -> list[str]:
+    if dim_dosen.empty:
+        return []
+    source_col = "nama_asal" if "nama_asal" in dim_dosen.columns else "nama_dosen_normalized"
+    options = (
+        dim_dosen[source_col]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .replace("", np.nan)
+        .dropna()
+        .drop_duplicates()
+        .sort_values(key=lambda s: s.str.lower())
+        .tolist()
+    )
+    display_options: list[str] = []
+    seen: set[str] = set()
+    for option in options:
+        display_value = display_person_name(option)
+        lookup = display_value.lower()
+        if display_value and lookup not in seen:
+            display_options.append(display_value)
+            seen.add(lookup)
+    return display_options
+
+
+def parse_ipk_input(value: str) -> tuple[float | None, str | None]:
+    normalized = str(value).strip().replace(",", ".")
+    if not re.fullmatch(r"\d(?:[.,]\d{1,2})?", str(value).strip()):
+        return None, "IPK hanya boleh angka desimal dengan titik atau koma, contoh 3,50 atau 3.50."
+    ipk_value = float(normalized)
+    if not 0 <= ipk_value <= 4:
+        return None, "IPK harus berada pada rentang 0 sampai 4."
+    return round(ipk_value, 2), None
+
+
+def validate_manual_record(nim: str, nama: str, judul: str, ipk_text: str) -> tuple[float | None, list[str]]:
+    errors: list[str] = []
+    nim_text = str(nim).strip()
+    if not re.fullmatch(r"\d{10}", nim_text):
+        errors.append("NIM harus tepat 10 angka.")
+
+    nama_clean = " ".join(nama.split())
+    if not nama_clean:
+        errors.append("Nama Lengkap wajib diisi.")
+    elif not re.fullmatch(r"[A-Za-z .,'-]+", nama_clean):
+        errors.append("Nama Lengkap hanya boleh berisi huruf dan tanda baca nama umum.")
+    elif re.search(r"\d", nama_clean):
+        errors.append("Nama Lengkap tidak boleh mengandung angka.")
+
+    if not judul.strip():
+        errors.append("Judul Tugas Akhir wajib diisi.")
+
+    ipk_value, ipk_error = parse_ipk_input(ipk_text)
+    if ipk_error:
+        errors.append(ipk_error)
+
+    return ipk_value, errors
 
 
 def parse_tanggal_lulus(value: object) -> pd.Timestamp:
@@ -1015,6 +1593,8 @@ def load_roles_data_from_db() -> pd.DataFrame:
     role_df["Tahun Wisuda"] = pd.to_numeric(role_df["Tahun Wisuda"], errors="coerce")
     role_df["Periode Num"] = pd.to_numeric(role_df["Periode Num"], errors="coerce").fillna(99).astype(int)
     role_df["IPK"] = pd.to_numeric(role_df["IPK"], errors="coerce")
+    if "urutan_peran" in role_df.columns:
+        role_df["urutan_peran"] = pd.to_numeric(role_df["urutan_peran"], errors="coerce")
     return role_df
 
 
@@ -1255,7 +1835,211 @@ def plot_empty(message: str) -> go.Figure:
     return fig
 
 
-def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
+def safe_text(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def format_change(current: float, previous: float, unit: str = "") -> str:
+    if pd.isna(current) or pd.isna(previous):
+        return "belum dapat dibandingkan"
+    delta = current - previous
+    if abs(delta) < 0.005:
+        return f"stabil di {current:.2f}{unit}"
+    direction = "naik" if delta > 0 else "turun"
+    return f"{direction} {abs(delta):.2f}{unit} menjadi {current:.2f}{unit}"
+
+
+def render_dynamic_panels(insights: list[str], recommendations: list[str]) -> None:
+    def render_items(items: list[str]) -> str:
+        return "".join(f'<li class="insight-item">{safe_text(item)}</li>' for item in items[:5])
+
+    col_insight, col_reco = st.columns(2)
+    with col_insight:
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div class="insight-panel-title">Insight Otomatis</div>
+                <ul class="insight-list">{render_items(insights)}</ul>
+                """,
+                unsafe_allow_html=True,
+            )
+    with col_reco:
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div class="insight-panel-title">Rekomendasi Tindakan</div>
+                <ul class="insight-list">{render_items(recommendations)}</ul>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def build_academic_insights(df: pd.DataFrame, target_months: int, target_ipk: float) -> tuple[list[str], list[str]]:
+    if df.empty:
+        return (
+            ["Tidak ada data alumni pada kombinasi filter saat ini."],
+            ["Periksa kembali kombinasi filter agar analisis akademik dapat ditampilkan."],
+        )
+
+    total = len(df)
+    avg_ipk = df["IPK"].mean()
+    avg_study = df["Lama Studi"].mean()
+    on_time_rate = df["Lama Studi"].le(target_months).mean() * 100
+    insights = [
+        f"Filter aktif menampilkan {total} alumni dengan rata-rata IPK {avg_ipk:.2f} dan rata-rata lama studi {avg_study:.1f} bulan.",
+        f"Sebanyak {on_time_rate:.1f}% alumni berada pada atau di bawah target {target_months} bulan.",
+    ]
+
+    yearly = df.groupby("Tahun Wisuda", as_index=False).agg(jumlah=("NO", "count"), rata_ipk=("IPK", "mean"), rata_studi=("Lama Studi", "mean")).sort_values("Tahun Wisuda")
+    if len(yearly) >= 2:
+        latest = yearly.iloc[-1]
+        previous = yearly.iloc[-2]
+        count_delta = int(latest["jumlah"] - previous["jumlah"])
+        count_direction = "naik" if count_delta > 0 else "turun" if count_delta < 0 else "stabil"
+        insights.append(
+            f"Jumlah lulusan tahun {int(latest['Tahun Wisuda'])} {count_direction} {abs(count_delta)} orang dibanding tahun {int(previous['Tahun Wisuda'])}."
+        )
+        insights.append(f"Rata-rata IPK tahun terbaru {format_change(float(latest['rata_ipk']), float(previous['rata_ipk']))} dibanding tahun sebelumnya.")
+
+    period_perf = (
+        df.groupby("Periode Wisuda", as_index=False)
+        .agg(jumlah=("NO", "count"), rata_ipk=("IPK", "mean"), rata_studi=("Lama Studi", "mean"))
+        .sort_values(["rata_ipk", "jumlah"], ascending=[False, False])
+    )
+    if not period_perf.empty:
+        best_period = period_perf.iloc[0]
+        insights.append(
+            f"{best_period['Periode Wisuda']} menjadi periode dengan performa IPK terbaik, rata-rata {best_period['rata_ipk']:.2f} dari {int(best_period['jumlah'])} alumni."
+        )
+
+    recommendations = []
+    if avg_study > target_months:
+        recommendations.append(f"Prioritaskan evaluasi proses akademik karena rata-rata lama studi masih melewati target {target_months} bulan.")
+    else:
+        recommendations.append(f"Pertahankan pola pembinaan akademik karena rata-rata lama studi sudah berada di bawah target {target_months} bulan.")
+    if avg_ipk < target_ipk:
+        recommendations.append(f"Lakukan monitoring kelompok IPK rendah karena rata-rata IPK masih di bawah target {target_ipk:.2f}.")
+    else:
+        recommendations.append(f"Gunakan kelompok dengan IPK di atas target {target_ipk:.2f} sebagai referensi praktik akademik yang baik.")
+    late_periods = (
+        df.groupby("Periode Wisuda", as_index=False)
+        .agg(rata_studi=("Lama Studi", "mean"), jumlah=("NO", "count"))
+        .sort_values("rata_studi", ascending=False)
+    )
+    if not late_periods.empty:
+        period = late_periods.iloc[0]
+        recommendations.append(f"Tinjau alumni pada {period['Periode Wisuda']} karena memiliki rata-rata lama studi tertinggi, yaitu {period['rata_studi']:.1f} bulan.")
+    recommendations.append("Gunakan hasil scatter IPK dan lama studi untuk mengidentifikasi alumni ber-IPK baik tetapi masa studi panjang sebagai bahan telaah proses bimbingan.")
+
+    return insights[:5], recommendations[:5]
+
+
+def build_lecturer_insights(role_df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    if role_df.empty:
+        return (
+            ["Tidak ada relasi dosen pada kombinasi filter saat ini."],
+            ["Periksa kembali kombinasi filter agar analisis beban dosen dapat ditampilkan."],
+        )
+
+    total_roles = int(role_df["role_count"].sum())
+    total_alumni = role_df["kelulusan_key"].nunique()
+    unique_lecturers = role_df["dosen_key"].nunique()
+    advisor_roles = int(role_df.loc[role_df["jenis_peran"].eq("Pembimbing"), "role_count"].sum())
+    examiner_roles = int(role_df.loc[role_df["jenis_peran"].eq("Penguji"), "role_count"].sum())
+    top_all = (
+        role_df.groupby(["dosen_key", "nama_dosen_normalized"], as_index=False)
+        .agg(jumlah_peran=("role_count", "sum"), jumlah_alumni=("kelulusan_key", "nunique"))
+        .sort_values("jumlah_peran", ascending=False)
+    )
+    top_lecturer = top_all.iloc[0]
+    concentration = (top_all.head(5)["jumlah_peran"].sum() / total_roles * 100) if total_roles else 0
+    role_balance = "pembimbing" if advisor_roles >= examiner_roles else "penguji"
+    advisor_positions = (
+        role_df[role_df["jenis_peran"].eq("Pembimbing")]
+        .groupby("urutan_peran", as_index=False)
+        .agg(jumlah=("role_count", "sum"))
+        .sort_values("urutan_peran")
+    )
+    advisor_1 = int(advisor_positions.loc[advisor_positions["urutan_peran"].eq(1), "jumlah"].sum())
+    advisor_2 = int(advisor_positions.loc[advisor_positions["urutan_peran"].eq(2), "jumlah"].sum())
+
+    insights = [
+        f"Terdapat {total_roles} relasi peran dari {unique_lecturers} dosen untuk {total_alumni} alumni pada filter aktif.",
+        f"{top_lecturer['nama_dosen_normalized']} memiliki relasi terbanyak dengan {int(top_lecturer['jumlah_peran'])} peran pada {int(top_lecturer['jumlah_alumni'])} alumni.",
+        f"Lima dosen teratas menangani {concentration:.1f}% dari total relasi peran.",
+        f"Komposisi peran lebih dominan sebagai {role_balance}: {advisor_roles} pembimbing dan {examiner_roles} penguji.",
+        f"Peran pembimbing terdiri dari {advisor_1} relasi Pembimbing 1 dan {advisor_2} relasi Pembimbing 2 pada filter aktif.",
+    ]
+
+    recommendations = [
+        f"Evaluasi distribusi beban {top_lecturer['nama_dosen_normalized']} agar kualitas bimbingan dan pengujian tetap terjaga.",
+        "Gunakan konsentrasi lima dosen teratas sebagai dasar pemerataan penugasan pada periode berikutnya.",
+    ]
+    if advisor_roles > examiner_roles * 1.25:
+        recommendations.append("Seimbangkan kembali peran penguji agar evaluasi sidang tidak terlalu terkonsentrasi pada kelompok tertentu.")
+    elif examiner_roles > advisor_roles * 1.25:
+        recommendations.append("Seimbangkan kembali peran pembimbing agar pendampingan tugas akhir tidak tertinggal dari aktivitas pengujian.")
+    else:
+        recommendations.append("Pertahankan keseimbangan peran pembimbing dan penguji karena komposisinya relatif proporsional.")
+    if advisor_1 > advisor_2 * 1.5 and advisor_2 > 0:
+        recommendations.append("Tinjau distribusi Pembimbing 2 karena relasinya jauh lebih sedikit dibanding Pembimbing 1.")
+    elif advisor_2 > advisor_1 * 1.5 and advisor_1 > 0:
+        recommendations.append("Tinjau distribusi Pembimbing 1 karena relasinya jauh lebih sedikit dibanding Pembimbing 2.")
+    else:
+        recommendations.append("Pertahankan komposisi Pembimbing 1 dan Pembimbing 2 karena distribusinya relatif seimbang.")
+    recommendations.append("Gunakan chart pembimbing untuk mengidentifikasi dosen yang terlalu sering berada pada posisi pembimbing tertentu.")
+
+    return insights[:5], recommendations[:5]
+
+
+def build_nlp_insights(df_nlp: pd.DataFrame, target_months: int) -> tuple[list[str], list[str]]:
+    if df_nlp.empty:
+        return (
+            [f"Tidak ada data tugas akhir pada filter aktif dengan lama studi hingga {target_months} bulan."],
+            ["Longgarkan filter lama studi atau filter lain untuk melihat pola kemiripan tugas akhir."],
+        )
+
+    scored_df = df_nlp.dropna(subset=["skor_kemiripan_tertinggi"]).copy()
+    if scored_df.empty:
+        return (
+            [f"Data tugas akhir tersedia, tetapi skor kemiripan belum tersedia pada filter lama studi hingga {target_months} bulan."],
+            ["Lengkapi atau sinkronkan atribut similarity agar insight kemiripan dapat dihitung untuk filter aktif."],
+        )
+
+    avg_similarity = scored_df["skor_kemiripan_tertinggi"].mean()
+    uniqueness_index = (1 - avg_similarity) * 100
+    redundant_count = int(scored_df["skor_kemiripan_tertinggi"].ge(0.85).sum())
+    review_count = int(scored_df["skor_kemiripan_tertinggi"].between(0.70, 0.8499).sum())
+    category_counts = scored_df["kategori_keunikan"].value_counts()
+    dominant_category = category_counts.index[0] if not category_counts.empty else "-"
+    keywords = top_keywords(df_nlp["Judul Final"], 5)
+
+    insights = [
+        f"Filter aktif menampilkan {len(df_nlp)} judul tugas akhir dengan indeks keunikan {uniqueness_index:.1f}/100.",
+        f"Rata-rata similarity tertinggi berada di {avg_similarity * 100:.1f}%, sehingga kedekatan judul berada pada kategori {dominant_category}.",
+        f"Terdapat {redundant_count} judul tidak unik dan {review_count} judul perlu review pada ambang similarity yang digunakan.",
+        f"Analisis ini sudah dibatasi pada alumni dengan lama studi hingga {target_months} bulan.",
+    ]
+    if not keywords.empty:
+        top_keyword = keywords.iloc[0]
+        insights.append(f"Kata kunci paling dominan adalah '{top_keyword['Kata']}' dengan {int(top_keyword['Frekuensi'])} kemunculan.")
+
+    recommendations = []
+    if redundant_count:
+        recommendations.append("Lakukan review substansi pada judul berkategori tidak unik sebelum periode pengajuan tugas akhir berikutnya.")
+    else:
+        recommendations.append("Pertahankan proses kurasi judul karena tidak ada judul yang melewati ambang tidak unik pada filter aktif.")
+    if review_count:
+        recommendations.append("Buat daftar pemantauan untuk judul pada kategori perlu review agar kemiripan konseptual tidak meningkat menjadi redundan.")
+    if not keywords.empty:
+        recommendations.append(f"Evaluasi kejenuhan topik berbasis kata kunci '{keywords.iloc[0]['Kata']}' dan dorong variasi tema riset baru.")
+    recommendations.append("Gunakan peta PCA untuk mengidentifikasi klaster judul yang rapat sebagai bahan diskusi topik prioritas departemen.")
+    recommendations.append(f"Bandingkan hasil ini dengan target lama studi lain untuk melihat apakah kemiripan topik berkaitan dengan alumni yang selesai lebih cepat.")
+
+    return insights[:5], recommendations[:5]
+
+
+def academic_dashboard(df: pd.DataFrame, target_months: int, target_ipk: float) -> None:
     total = len(df)
     avg_ipk = df["IPK"].mean()
     avg_study = df["Lama Studi"].mean()
@@ -1410,6 +2194,9 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
         )
 
     st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
+    insights, recommendations = build_academic_insights(df, target_months, target_ipk)
+    render_dynamic_panels(insights, recommendations)
+    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
     if df.empty:
         fig_empty = plot_empty("Tidak ada data pada filter ini.")
@@ -1546,12 +2333,17 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
             )
         )
         fig.add_vline(x=target_months, line_dash="dash", line_color="#c23b3f", annotation_text=f"Target {target_months} bulan")
+        fig.add_hline(y=target_ipk, line_dash="dash", line_color="#c23b3f", annotation_text=f"Target IPK {target_ipk:.2f}")
         style_plotly_fig(fig)
         fig.update_layout(height=460)
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with st.expander("Audit Data Alumni"):
-        query = st.text_input("Cari nama/NIM", placeholder="Contoh: Fitrah Annisa Sari")
+        st.markdown(
+            '<div class="audit-toolbar-note">Telusuri data akademik alumni berdasarkan nama atau NIM, lalu cek atribut kelulusan utama dalam satu tabel ringkas.</div>',
+            unsafe_allow_html=True,
+        )
+        query = st.text_input("Cari nama/NIM", placeholder="Contoh: Fitrah Annisa Sari atau 2011521001")
         audit_df = df.copy()
         if query.strip():
             pattern = query.strip().lower()
@@ -1559,20 +2351,54 @@ def academic_dashboard(df: pd.DataFrame, target_months: int) -> None:
                 audit_df["Nama"].astype(str).str.lower().str.contains(pattern, na=False)
                 | audit_df["NIM"].astype(str).str.lower().str.contains(pattern, na=False)
             ]
+        avg_ipk_audit = audit_df["IPK"].mean() if not audit_df.empty else 0
+        avg_study_audit = audit_df["Lama Studi"].mean() if not audit_df.empty else 0
+        latest_year_audit = int(audit_df["Tahun Wisuda"].max()) if not audit_df.empty else "-"
+        st.markdown(
+            f"""
+            <div class="audit-summary-grid">
+                <div class="audit-summary-card">
+                    <div class="audit-summary-label">Record</div>
+                    <div class="audit-summary-value">{len(audit_df):,}</div>
+                </div>
+                <div class="audit-summary-card">
+                    <div class="audit-summary-label">Rata IPK</div>
+                    <div class="audit-summary-value">{avg_ipk_audit:.2f}</div>
+                </div>
+                <div class="audit-summary-card">
+                    <div class="audit-summary-label">Rata Studi</div>
+                    <div class="audit-summary-value">{avg_study_audit:.1f}</div>
+                </div>
+                <div class="audit-summary-card">
+                    <div class="audit-summary-label">Tahun Terbaru</div>
+                    <div class="audit-summary-value">{latest_year_audit}</div>
+                </div>
+            </div>
+            """.replace(",", "."),
+            unsafe_allow_html=True,
+        )
+        audit_preview = audit_df[
+            [
+                "NO",
+                "Nama",
+                "NIM",
+                "Periode Wisuda",
+                "Tahun Wisuda",
+                "Tanggal Lulus",
+                "IPK",
+                "Lama Studi",
+                "Judul Tugas Akhir",
+            ]
+        ].head(50).rename(
+            columns={
+                "NO": "No",
+                "Tahun Wisuda": "Tahun",
+                "Tanggal Lulus": "Tanggal Lulus",
+                "Lama Studi": "Lama Studi (Bulan)",
+            }
+        )
         st.dataframe(
-            audit_df[
-                [
-                    "NO",
-                    "Nama",
-                    "NIM",
-                    "Periode Wisuda",
-                    "Tahun Wisuda",
-                    "Tanggal Lulus",
-                    "IPK",
-                    "Lama Studi",
-                    "Judul Tugas Akhir",
-                ]
-            ].head(50),
+            audit_preview.style.format({"IPK": "{:.2f}", "Lama Studi (Bulan)": "{:.0f}"}),
             use_container_width=True,
             hide_index=True,
         )
@@ -1652,6 +2478,8 @@ def lecturer_dashboard(df: pd.DataFrame, schema: StarSchema) -> None:
 
 def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
     if role_df.empty:
+        insights, recommendations = build_lecturer_insights(role_df)
+        render_dynamic_panels(insights, recommendations)
         st.info("Tidak ada data peran dosen pada filter ini.")
         return
 
@@ -1756,6 +2584,9 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
         )
 
     st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
+    insights, recommendations = build_lecturer_insights(role_df)
+    render_dynamic_panels(insights, recommendations)
+    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
     top_all = (
         role_df.groupby(["dosen_key", "nama_dosen_normalized"], as_index=False)
@@ -1800,21 +2631,42 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
 
     with col_right:
         with st.container(border=True):
+            advisor_position = (
+                role_df[
+                    role_df["jenis_peran"].eq("Pembimbing")
+                    & role_df["urutan_peran"].isin([1, 2])
+                    & role_df["dosen_key"].isin(top_all["dosen_key"])
+                ]
+                .assign(Posisi=lambda data: "Pembimbing " + data["urutan_peran"].astype(int).astype(str))
+                .groupby(["dosen_key", "nama_dosen_normalized", "Posisi"], as_index=False)
+                .agg(jumlah=("role_count", "sum"))
+                .merge(top_all[["dosen_key", "jumlah_peran"]], on="dosen_key", how="left")
+            )
             fig = px.bar(
-                top_all.sort_values("jumlah_peran"),
-                x=["jumlah_peran", "jumlah_alumni"],
+                advisor_position.sort_values("jumlah_peran"),
+                x="jumlah",
                 y="nama_dosen_normalized",
+                color="Posisi",
                 orientation="h",
-                title="Perbandingan Total Peran vs Alumni Unik",
-                labels={"value": "Jumlah", "nama_dosen_normalized": "Dosen", "variable": "Metrik"},
-                color_discrete_sequence=["#114b36", "#5b7894"],
+                title="Distribusi Dosen Pembimbing 1 dan 2",
+                labels={
+                    "jumlah": "Jumlah Relasi Pembimbing",
+                    "nama_dosen_normalized": "Dosen",
+                    "Posisi": "Posisi Pembimbing",
+                },
+                color_discrete_map={"Pembimbing 1": "#114b36", "Pembimbing 2": "#5b7894"},
             )
             try:
                 fig.update_layout(barcornerradius=6)
             except Exception:
                 pass
             style_plotly_fig(fig)
-            fig.update_layout(height=520, margin=dict(l=10, r=10, t=55, b=10), yaxis={"categoryorder": "total ascending"})
+            fig.update_layout(
+                height=520,
+                margin=dict(l=10, r=10, t=55, b=10),
+                barmode="stack",
+                yaxis={"categoryorder": "total ascending"},
+            )
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
@@ -1849,12 +2701,20 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
     )
 
 
-def nlp_dashboard(df: pd.DataFrame) -> None:
-    if df.empty or df["skor_kemiripan_tertinggi"].isna().all():
+def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
+    if df.empty:
+        insights, recommendations = build_nlp_insights(df, target_months)
+        render_dynamic_panels(insights, recommendations)
         st.info("Tidak ada atribut NLP pada dim_tugas_akhir untuk filter ini.")
         return
 
-    df_nlp = df.copy()
+    df_nlp = df[df["Lama Studi"].le(target_months)].copy()
+    if df_nlp.empty or df_nlp["skor_kemiripan_tertinggi"].isna().all():
+        insights, recommendations = build_nlp_insights(df_nlp, target_months)
+        render_dynamic_panels(insights, recommendations)
+        st.info("Tidak ada atribut NLP pada dim_tugas_akhir untuk filter lama studi ini.")
+        return
+
     avg_similarity = df_nlp["skor_kemiripan_tertinggi"].mean()
     uniqueness_index = (1 - avg_similarity) * 100
     redundant_count = df_nlp["skor_kemiripan_tertinggi"].ge(0.85).sum()
@@ -1953,6 +2813,9 @@ def nlp_dashboard(df: pd.DataFrame) -> None:
             unsafe_allow_html=True
         )
 
+    st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
+    insights, recommendations = build_nlp_insights(df_nlp, target_months)
+    render_dynamic_panels(insights, recommendations)
     st.markdown('<div style="height: 10px;"></div>', unsafe_allow_html=True)
 
 
@@ -2338,6 +3201,8 @@ def render_header(df: pd.DataFrame) -> None:
 
 def main() -> None:
     inject_css()
+    inject_sidebar_resize_guard()
+    inject_manual_form_input_guard()
 
     # Render Logo and Brand in Sidebar (Compact, Premium Front-end Layout)
     logo_path = Path("img/unandlogo.png")
@@ -2449,18 +3314,19 @@ def main() -> None:
     nav_css = []
     if st.session_state.page == "Dashboard":
         nav_css.append("""
-        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) button {
+        [data-testid="stSidebar"] .st-key-btn_nav_dash button {
             background-color: var(--accent) !important;
             color: #ffffff !important;
             border-color: var(--accent) !important;
             font-weight: 600 !important;
+            box-shadow: 0 4px 10px rgba(17, 75, 54, 0.16) !important;
         }
-        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(2) button {
+        [data-testid="stSidebar"] .st-key-btn_nav_tendik button {
             background-color: #ffffff !important;
             color: #475569 !important;
             border: 1px solid #cbd5e1 !important;
         }
-        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(2) button:hover {
+        [data-testid="stSidebar"] .st-key-btn_nav_tendik button:hover {
             border-color: var(--accent) !important;
             color: var(--accent) !important;
             background-color: var(--accent-soft) !important;
@@ -2468,18 +3334,19 @@ def main() -> None:
         """)
     else:
         nav_css.append("""
-        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(2) button {
+        [data-testid="stSidebar"] .st-key-btn_nav_tendik button {
             background-color: var(--accent) !important;
             color: #ffffff !important;
             border-color: var(--accent) !important;
             font-weight: 600 !important;
+            box-shadow: 0 4px 10px rgba(17, 75, 54, 0.16) !important;
         }
-        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) button {
+        [data-testid="stSidebar"] .st-key-btn_nav_dash button {
             background-color: #ffffff !important;
             color: #475569 !important;
             border: 1px solid #cbd5e1 !important;
         }
-        [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-of-type(1) button:hover {
+        [data-testid="stSidebar"] .st-key-btn_nav_dash button:hover {
             border-color: var(--accent) !important;
             color: var(--accent) !important;
             background-color: var(--accent-soft) !important;
@@ -2497,48 +3364,48 @@ def main() -> None:
         with st.sidebar.expander("Tahun Wisuda", expanded=True):
             years = st.slider("Pilih Tahun Wisuda", min_year, max_year, (min_year, max_year), label_visibility="collapsed")
             
-        periode_options = sorted(df["Periode Wisuda"].dropna().unique().tolist(), key=lambda x: PERIODE_ORDER.get(x, 99))
+        periode_options = [item[0] for item in PERIODE_FILTER_OPTIONS]
         with st.sidebar.expander("Periode Wisuda", expanded=True):
             if "selected_periods" not in st.session_state:
-                st.session_state.selected_periods = set(periode_options)
+                st.session_state.selected_periods = set(df["Periode Wisuda"].dropna().unique().tolist())
+            st.session_state.selected_periods = set(st.session_state.selected_periods).intersection(set(periode_options))
                 
             # Checkbox Squares timeline row
-            cols = st.columns(5)
-            roman_numerals = ["I", "II", "III", "IV", "V"]
-            circle_months = ["Feb", "Apr", "Jun", "Sep", "Nov"]
-            for idx, p_name in enumerate(periode_options[:5]):
-                is_sel = p_name in st.session_state.selected_periods
-                with cols[idx]:
-                    if st.button(roman_numerals[idx], key=f"circle_btn_{idx}", use_container_width=True):
-                         if is_sel:
-                             st.session_state.selected_periods.remove(p_name)
-                         else:
-                             st.session_state.selected_periods.add(p_name)
-                         st.rerun()
-                    st.markdown(f'<div class="circle-label" style="text-align: center; margin-top: 4px; font-weight: 600; font-size: 0.75rem; color: #64748b;">{circle_months[idx]}</div>', unsafe_allow_html=True)
+            for row_start in range(0, len(PERIODE_FILTER_OPTIONS), 3):
+                cols = st.columns(3)
+                for offset, (p_name, roman_label, month_label, _) in enumerate(PERIODE_FILTER_OPTIONS[row_start:row_start + 3]):
+                    idx = row_start + offset
+                    is_sel = p_name in st.session_state.selected_periods
+                    with cols[offset]:
+                        if st.button(roman_label, key=f"circle_btn_{idx}", use_container_width=True):
+                             if is_sel:
+                                 st.session_state.selected_periods.remove(p_name)
+                             else:
+                                 st.session_state.selected_periods.add(p_name)
+                             st.rerun()
+                        st.markdown(f'<div class="circle-label" style="text-align: center; margin-top: 4px; font-weight: 600; font-size: 0.75rem; color: #64748b;">{month_label}</div>', unsafe_allow_html=True)
                     
             # Generate dynamic CSS for current state
-            circle_colors = ["#0084ff", "#a855f7", "#008a50", "#fb923c", "#ef4444"]
-            
-            for idx in range(5):
-                p_name = periode_options[idx]
+            for idx, (p_name, _, _, _) in enumerate(PERIODE_FILTER_OPTIONS):
                 is_sel = p_name in st.session_state.selected_periods
                 
                 # Checkbox square styles
                 if is_sel:
                     style_lines.append(f"""
-                    [data-testid="stSidebar"] details div[data-testid="column"]:nth-of-type({idx+1}) button {{
-                        background-color: {circle_colors[idx]} !important;
+                    [data-testid="stSidebar"] [data-testid="stSidebarContent"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] .st-key-circle_btn_{idx} div[data-testid="stButton"] button[data-testid="stBaseButton-secondary"] {{
+                        background-color: var(--accent) !important;
                         color: #ffffff !important;
-                        border: 2px solid {circle_colors[idx]} !important;
+                        border: 2px solid var(--accent) !important;
+                        box-shadow: 0 5px 12px rgba(17, 75, 54, 0.16) !important;
                     }}
                     """)
                 else:
                     style_lines.append(f"""
-                    [data-testid="stSidebar"] details div[data-testid="column"]:nth-of-type({idx+1}) button {{
+                    [data-testid="stSidebar"] [data-testid="stSidebarContent"] details div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] .st-key-circle_btn_{idx} div[data-testid="stButton"] button[data-testid="stBaseButton-secondary"] {{
                         background-color: #ffffff !important;
                         color: #475569 !important;
                         border: 1px solid #cbd5e1 !important;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
                     }}
                     """)
                     
@@ -2559,11 +3426,11 @@ def main() -> None:
 
         tabs = st.tabs(["Akademik", "Dosen", "Kemiripan Tugas Akhir"])
         with tabs[0]:
-            academic_dashboard(filtered, target_months)
+            academic_dashboard(filtered, target_months, ipk_range[0])
         with tabs[1]:
             lecturer_dashboard_from_roles(filtered_roles)
         with tabs[2]:
-            nlp_dashboard(filtered)
+            nlp_dashboard(filtered, target_months)
 
     else:  # Tendik page
         tab_excel, tab_manual = st.tabs(["📁 Unggah via Excel/CSV", "✏️ Input Manual Satu-Satu"])
@@ -2744,52 +3611,59 @@ def main() -> None:
                     
         with tab_manual:
             st.markdown("### Formulir Input Manual Alumni")
+            lecturer_options = get_lecturer_options(schema.dim_dosen)
+            lecturer_select_options = [""] + lecturer_options
             with st.form("form_manual_input", clear_on_submit=True):
                 col_form1, col_form2 = st.columns(2)
                 with col_form1:
-                    m_nim = st.text_input("NIM *", placeholder="Contoh: 2011521001")
+                    m_nim = st.text_input("NIM *", value="2011521001", placeholder="Contoh: 2011521001")
                     m_nama = st.text_input("Nama Lengkap *", placeholder="Contoh: Fitrah Annisa Sari")
                     m_judul = st.text_area("Judul Tugas Akhir *", placeholder="Tuliskan judul tugas akhir lengkap...")
                     m_tgl = st.date_input("Tanggal Lulus *", value=datetime.date.today())
                 with col_form2:
-                    m_ipk = st.number_input("IPK Lulus *", min_value=0.0, max_value=4.0, value=3.5, step=0.01)
-                    m_studi = st.number_input("Lama Studi (Bulan) *", min_value=1, max_value=120, value=48, step=1)
-                    m_periode = st.selectbox("Periode Wisuda *", ["WISUDA I", "WISUDA II", "WISUDA III", "WISUDA IV", "WISUDA V"])
-                    m_tahun = st.number_input("Tahun Wisuda *", min_value=2010, max_value=2050, value=datetime.date.today().year, step=1)
+                    m_ipk = st.text_input("IPK Lulus *", value="3,50", placeholder="Contoh: 3,50")
+                    m_studi = st.text_input("Lama Studi (Bulan) *", value="48", placeholder="Contoh: 48")
+                    m_periode = st.selectbox("Periode Wisuda *", [item[0] for item in PERIODE_FILTER_OPTIONS])
+                    m_tahun = st.text_input("Tahun Wisuda *", value=str(datetime.date.today().year), placeholder="Contoh: 2026")
                     
                 st.markdown("**Peran Dosen (Opsional)**")
                 col_dosen1, col_dosen2 = st.columns(2)
                 with col_dosen1:
-                    m_pem1 = st.text_input("Dosen Pembimbing 1")
-                    m_pem2 = st.text_input("Dosen Pembimbing 2")
-                    m_peng1 = st.text_input("Dosen Penguji 1")
+                    m_pem1 = st.selectbox("Dosen Pembimbing 1", lecturer_select_options, key="manual_pembimbing_1")
+                    m_pem2 = st.selectbox("Dosen Pembimbing 2", lecturer_select_options, key="manual_pembimbing_2")
                 with col_dosen2:
-                    m_peng2 = st.text_input("Dosen Penguji 2")
-                    m_peng3 = st.text_input("Dosen Penguji 3")
+                    m_peng1 = st.selectbox("Dosen Penguji 1", lecturer_select_options, key="manual_penguji_1")
+                    m_peng2 = st.selectbox("Dosen Penguji 2", lecturer_select_options, key="manual_penguji_2")
+                    m_peng3 = st.selectbox("Dosen Penguji 3", lecturer_select_options, key="manual_penguji_3")
                     
                 submit_manual = st.form_submit_button("Tambahkan ke Preview", use_container_width=True)
                 if submit_manual:
-                    if not m_nim.strip() or not m_nama.strip() or not m_judul.strip():
-                        st.error("NIM, Nama Lengkap, dan Judul Tugas Akhir wajib diisi!")
+                    ipk_value, validation_errors = validate_manual_record(m_nim, m_nama, m_judul, m_ipk)
+                    if not m_studi.strip():
+                        validation_errors.append("Lama Studi wajib diisi angka.")
+                    if not re.fullmatch(r"\d{4}", m_tahun.strip()):
+                        validation_errors.append("Tahun Wisuda harus 4 angka.")
+                    if validation_errors:
+                        st.error("Periksa kembali input berikut:\n- " + "\n- ".join(validation_errors))
                     else:
                         new_rec = {
                             "nim": m_nim.strip(),
-                            "nama": m_nama.strip(),
+                            "nama": " ".join(m_nama.split()),
                             "judul_ta": m_judul.strip(),
                             "tanggal_lulus": str(m_tgl),
-                            "ipk": float(m_ipk),
-                            "lama_studi": int(m_studi),
+                            "ipk": float(ipk_value),
+                            "lama_studi": int(m_studi.strip()),
                             "periode_wisuda": m_periode.upper(),
-                            "tahun_wisuda": int(m_tahun),
-                            "pembimbing_1": m_pem1.strip() if m_pem1.strip() else None,
-                            "pembimbing_2": m_pem2.strip() if m_pem2.strip() else None,
-                            "penguji_1": m_peng1.strip() if m_peng1.strip() else None,
-                            "penguji_2": m_peng2.strip() if m_peng2.strip() else None,
-                            "penguji_3": m_peng3.strip() if m_peng3.strip() else None,
+                            "tahun_wisuda": int(m_tahun.strip()),
+                            "pembimbing_1": m_pem1 if m_pem1 else None,
+                            "pembimbing_2": m_pem2 if m_pem2 else None,
+                            "penguji_1": m_peng1 if m_peng1 else None,
+                            "penguji_2": m_peng2 if m_peng2 else None,
+                            "penguji_3": m_peng3 if m_peng3 else None,
                         }
                         st.session_state.tendik_preview_records.append(new_rec)
                         st.toast("Data ditambahkan ke preview!", icon="✏️")
-                        st.rerun()
+                        st.success("Data berhasil ditambahkan ke preview.")
 
         # Preview Section
         st.markdown("---")

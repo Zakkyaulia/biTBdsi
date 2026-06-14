@@ -1874,7 +1874,12 @@ def render_dynamic_panels(insights: list[str], recommendations: list[str]) -> No
             )
 
 
-def build_academic_insights(df: pd.DataFrame, target_months: int, target_ipk: float) -> tuple[list[str], list[str]]:
+def build_academic_insights(
+    df: pd.DataFrame,
+    target_months: int,
+    target_ipk: float,
+) -> tuple[list[str], list[str]]:
+    """Insight dan rekomendasi manual 3-kasus untuk 5 visualisasi Tab Akademik."""
     if df.empty:
         return (
             ["Tidak ada data alumni pada kombinasi filter saat ini."],
@@ -1882,117 +1887,253 @@ def build_academic_insights(df: pd.DataFrame, target_months: int, target_ipk: fl
         )
 
     total = len(df)
-    avg_ipk = df["IPK"].mean()
-    avg_study = df["Lama Studi"].mean()
-    on_time_rate = df["Lama Studi"].le(target_months).mean() * 100
-    insights = [
-        f"Filter aktif menampilkan {total} alumni dengan rata-rata IPK {avg_ipk:.2f} dan rata-rata lama studi {avg_study:.1f} bulan.",
-        f"Sebanyak {on_time_rate:.1f}% alumni berada pada atau di bawah target {target_months} bulan.",
-    ]
+    avg_ipk = float(df["IPK"].mean())
+    avg_study = float(df["Lama Studi"].mean())
+    on_time_pct = float(df["Lama Studi"].le(target_months).mean() * 100)
 
-    yearly = df.groupby("Tahun Wisuda", as_index=False).agg(jumlah=("NO", "count"), rata_ipk=("IPK", "mean"), rata_studi=("Lama Studi", "mean")).sort_values("Tahun Wisuda")
+    # --- Vis 1: Trend lulusan per tahun ---
+    yearly = (
+        df.groupby("Tahun Wisuda", as_index=False)
+        .agg(jumlah=("NO", "count"))
+        .sort_values("Tahun Wisuda")
+    )
     if len(yearly) >= 2:
-        latest = yearly.iloc[-1]
-        previous = yearly.iloc[-2]
-        count_delta = int(latest["jumlah"] - previous["jumlah"])
-        count_direction = "naik" if count_delta > 0 else "turun" if count_delta < 0 else "stabil"
-        insights.append(
-            f"Jumlah lulusan tahun {int(latest['Tahun Wisuda'])} {count_direction} {abs(count_delta)} orang dibanding tahun {int(previous['Tahun Wisuda'])}."
-        )
-        insights.append(f"Rata-rata IPK tahun terbaru {format_change(float(latest['rata_ipk']), float(previous['rata_ipk']))} dibanding tahun sebelumnya.")
-
-    period_perf = (
-        df.groupby("Periode Wisuda", as_index=False)
-        .agg(jumlah=("NO", "count"), rata_ipk=("IPK", "mean"), rata_studi=("Lama Studi", "mean"))
-        .sort_values(["rata_ipk", "jumlah"], ascending=[False, False])
-    )
-    if not period_perf.empty:
-        best_period = period_perf.iloc[0]
-        insights.append(
-            f"{best_period['Periode Wisuda']} menjadi periode dengan performa IPK terbaik, rata-rata {best_period['rata_ipk']:.2f} dari {int(best_period['jumlah'])} alumni."
-        )
-
-    recommendations = []
-    if avg_study > target_months:
-        recommendations.append(f"Prioritaskan evaluasi proses akademik karena rata-rata lama studi masih melewati target {target_months} bulan.")
+        latest_count = int(yearly.iloc[-1]["jumlah"])
+        prev_count = int(yearly.iloc[-2]["jumlah"])
+        pct_change = ((latest_count - prev_count) / prev_count * 100) if prev_count else 0
+        yr_latest = int(yearly.iloc[-1]["Tahun Wisuda"])
+        if pct_change <= -10:
+            vis1_insight = (f"Volume lulusan pada tahun {yr_latest} mengalami penurunan sebesar {abs(pct_change):.0f}% "
+                            "dibandingkan tahun sebelumnya. Kondisi ini mengindikasikan adanya hambatan "
+                            "signifikan dalam penyelesaian tugas akhir atau proses pendaftaran wisuda di kalangan mahasiswa tingkat akhir.")
+            vis1_reco = (f"Departemen perlu melakukan asesmen menyeluruh terhadap mahasiswa yang telah menempuh "
+                         f"studi di atas 8 semester guna mengidentifikasi faktor penghambat kelulusan dan "
+                         "merancang program intervensi akademik yang terstruktur.")
+        elif pct_change >= 10:
+            vis1_insight = (f"Terdapat peningkatan volume lulusan sebesar {pct_change:.0f}% pada tahun {yr_latest}, "
+                            "mencerminkan efektivitas proses pembimbingan dan pengelolaan akademik. "
+                            "Namun, lonjakan ini berpotensi menambah beban administratif pada proses pemrosesan dokumen kelulusan.")
+            vis1_reco = ("Departemen perlu memastikan kapasitas sumber daya administratif, khususnya "
+                         "tenaga kependidikan, memadai untuk memproses dokumen akademik secara tepat waktu "
+                         "di tengah peningkatan jumlah wisudawan.")
+        else:
+            vis1_insight = (f"Tren jumlah lulusan menunjukkan kestabilan dengan rata-rata {latest_count} alumni per tahun, "
+                            "mengindikasikan keseimbangan yang baik antara arus masuk mahasiswa baru "
+                            "dan tingkat penyelesaian studi di departemen ini.")
+            vis1_reco = ("Departemen disarankan mempertahankan kuota bimbingan yang berlaku serta "
+                         "memastikan kelancaran proses administrasi pendaftaran wisuda "
+                         "guna menjaga momentum kelulusan yang konsisten ini.")
     else:
-        recommendations.append(f"Pertahankan pola pembinaan akademik karena rata-rata lama studi sudah berada di bawah target {target_months} bulan.")
-    if avg_ipk < target_ipk:
-        recommendations.append(f"Lakukan monitoring kelompok IPK rendah karena rata-rata IPK masih di bawah target {target_ipk:.2f}.")
+        vis1_insight = f"Tersedia data kelulusan sejumlah {total} alumni. Diperlukan data minimal dua tahun untuk analisis tren yang representatif."
+        vis1_reco = "Lengkapi basis data historis kelulusan agar analisis tren tahunan dapat dilakukan secara komprehensif dan akurat."
+
+    # --- Vis 2: Distribusi rentang IPK ---
+    low_ipk_pct = float(df["IPK"].lt(3.0).mean() * 100)
+    high_ipk_pct = float(df["IPK"].ge(3.75).mean() * 100)
+    if low_ipk_pct >= 20:
+        vis2_insight = (f"Sebesar {low_ipk_pct:.1f}% alumni tercatat memiliki IPK di bawah 3,00. "
+                        "Hal ini mengindikasikan adanya tantangan substantif dalam penguasaan materi inti "
+                        "atau ketidaksesuaian antara standar penilaian dengan kesiapan akademik mahasiswa.")
+        vis2_reco = ("Direkomendasikan untuk melakukan evaluasi komprehensif terhadap metode pengajaran "
+                     "pada mata kuliah berbobot SKS tinggi, serta mengimplementasikan program pendampingan "
+                     "akademik terstruktur sebelum pelaksanaan ujian tengah dan akhir semester.")
+    elif high_ipk_pct >= 40:
+        vis2_insight = (f"Sebesar {high_ipk_pct:.1f}% alumni meraih IPK di atas 3,75 dengan predikat Cumlaude. "
+                        "Meskipun mencerminkan capaian akademik yang positif, kondisi ini memerlukan "
+                        "validasi untuk memastikan tidak terjadi deviasi pada standar penilaian.")
+        vis2_reco = ("Departemen disarankan untuk mendistribusikan lulusan berprestasi tinggi ke program "
+                     "beasiswa lanjutan atau mitra industri strategis, sekaligus melakukan audit "
+                     "kalibrasi penilaian antar dosen guna menjaga integritas standar akademik.")
     else:
-        recommendations.append(f"Gunakan kelompok dengan IPK di atas target {target_ipk:.2f} sebagai referensi praktik akademik yang baik.")
-    late_periods = (
+        vis2_insight = (f"Distribusi rentang IPK menunjukkan pola yang sehat dan proporsional, "
+                        f"dengan rata-rata IPK {avg_ipk:.2f}. Mayoritas alumni berada pada rentang kompetitif "
+                        "yang relevan dengan standar rekrutmen industri dan institusi akademik.")
+        vis2_reco = ("Departemen disarankan mempertahankan standar penilaian yang berlaku dan mendorong "
+                     "mahasiswa dengan performa baik untuk mengikuti sertifikasi kompetensi profesi "
+                     "guna meningkatkan posisi kompetitif di pasar tenaga kerja.")
+
+    # --- Vis 3: Lulusan per periode wisuda ---
+    period_counts = (
         df.groupby("Periode Wisuda", as_index=False)
-        .agg(rata_studi=("Lama Studi", "mean"), jumlah=("NO", "count"))
-        .sort_values("rata_studi", ascending=False)
+        .agg(jumlah=("NO", "count"), rata_ipk=("IPK", "mean"))
     )
-    if not late_periods.empty:
-        period = late_periods.iloc[0]
-        recommendations.append(f"Tinjau alumni pada {period['Periode Wisuda']} karena memiliki rata-rata lama studi tertinggi, yaitu {period['rata_studi']:.1f} bulan.")
-    recommendations.append("Gunakan hasil scatter IPK dan lama studi untuk mengidentifikasi alumni ber-IPK baik tetapi masa studi panjang sebagai bahan telaah proses bimbingan.")
+    if not period_counts.empty:
+        max_period = period_counts.loc[period_counts["jumlah"].idxmax()]
+        min_period = period_counts.loc[period_counts["jumlah"].idxmin()]
+        ratio = max_period["jumlah"] / (min_period["jumlah"] + 1e-9)
+        if ratio >= 3:
+            vis3_insight = (f"{max_period['Periode Wisuda']} mencatat volume lulusan tertinggi "
+                            f"({int(max_period['jumlah'])} alumni, rata-rata IPK {max_period['rata_ipk']:.2f}). "
+                            "Konsentrasi kelulusan pada satu periode tertentu umumnya dipicu oleh "
+                            "tenggat beasiswa, persyaratan rekrutmen, atau batas waktu administrasi.")
+            vis3_reco = ("Departemen disarankan menerapkan sistem reservasi slot sidang secara dini "
+                         "dan membuka pendaftaran berkas wisuda lebih awal pada periode dengan "
+                         "proyeksi volume tinggi guna menghindari penumpukan kapasitas layanan.")
+        elif ratio <= 1.5:
+            vis3_insight = ("Distribusi jumlah lulusan antar periode wisuda menunjukkan pola yang merata "
+                            "dan konsisten. Kondisi ini mencerminkan pengelolaan kalender akademik "
+                            "yang efektif serta tidak adanya penumpukan pendaftaran wisuda secara masif.")
+            vis3_reco = ("Departemen disarankan mempertahankan jadwal pembukaan pendaftaran berkas "
+                         "yang merata di setiap periode untuk menjaga distribusi beban kerja administratif "
+                         "yang proporsional sepanjang tahun akademik.")
+        else:
+            vis3_insight = (f"{min_period['Periode Wisuda']} mencatat volume lulusan yang relatif rendah. "
+                            "Kondisi ini dapat disebabkan oleh keterbatasan slot sidang, "
+                            "konflik kalender akademik, atau faktor administratif yang perlu diidentifikasi lebih lanjut.")
+            vis3_reco = ("Departemen perlu melakukan analisis mendalam terhadap faktor yang menyebabkan "
+                         "rendahnya partisipasi wisudawan pada periode tersebut, termasuk evaluasi "
+                         "jadwal sidang dan kapasitas layanan administrasi akademik.")
+    else:
+        vis3_insight = "Data periode wisuda belum mencukupi untuk analisis distribusi."
+        vis3_reco = "Pastikan atribut Periode Wisuda terisi secara lengkap dan konsisten pada basis data."
 
-    return insights[:5], recommendations[:5]
+    # --- Vis 4: Komposisi lama studi ---
+    if on_time_pct < 50:
+        vis4_insight = (f"Hanya {on_time_pct:.1f}% alumni yang menyelesaikan studi dalam batas waktu "
+                        f"yang ditetapkan (≤{target_months} bulan). Proporsi ini berada di bawah ambang "
+                        "kritis dan berpotensi berdampak negatif terhadap nilai akreditasi program studi.")
+        vis4_reco = ("Departemen perlu melakukan simplifikasi prosedur penugasan dosen pembimbing "
+                     "dan mempercepat proses persetujuan proposal tugas akhir guna mengurangi "
+                     "waktu tunggu mahasiswa pada fase awal penulisan skripsi.")
+    elif on_time_pct >= 80:
+        vis4_insight = (f"Sebesar {on_time_pct:.1f}% alumni berhasil menyelesaikan studi dalam "
+                        f"batas waktu ≤{target_months} bulan. Capaian ini mencerminkan efektivitas "
+                        "sistem pembimbingan dan kelancaran alur penyelesaian tugas akhir di departemen.")
+        vis4_reco = ("Departemen disarankan memberikan apresiasi formal kepada dosen pembimbing "
+                     "yang berkontribusi terhadap pencapaian ini dan mendokumentasikan praktik "
+                     "pembimbingan terbaik sebagai standar prosedur operasional departemen.")
+    else:
+        vis4_insight = (f"Proporsi kelulusan tepat waktu tercatat sebesar {on_time_pct:.1f}%, "
+                        "berada pada rentang yang dapat diterima namun masih terdapat peluang "
+                        "peningkatan yang signifikan untuk mendukung target kinerja program studi.")
+        vis4_reco = ("Departemen disarankan menetapkan mekanisme evaluasi berkala setiap tiga bulan "
+                     "bagi mahasiswa yang sedang menempuh tugas akhir, guna memastikan "
+                     "kemajuan yang terukur dan mencegah keterlambatan penyelesaian.")
+
+    # --- Vis 5: Scatter IPK vs Lama Studi ---
+    slow_highipk = float(df[(df["IPK"] >= 3.5) & (df["Lama Studi"] > target_months)].shape[0])
+    slow_lowipk = float(df[(df["IPK"] < 3.0) & (df["Lama Studi"] > target_months)].shape[0])
+    if slow_lowipk / (total + 1e-9) >= 0.15:
+        vis5_insight = (f"Terdapat {int(slow_lowipk)} alumni yang berada pada segmen IPK rendah (<3,0) "
+                        f"dengan masa studi melebihi {target_months} bulan. Kelompok ini termasuk dalam "
+                        "kategori risiko tinggi dan memerlukan perhatian intervensi akademik secara prioritas.")
+        vis5_reco = ("Departemen perlu mengidentifikasi mahasiswa pada segmen kritis ini berdasarkan "
+                     "data NIM dan menginisiasi program konseling akademik terjadwal "
+                     "atau jalur penyelesaian tugas akhir yang lebih terstruktur.")
+    elif slow_highipk / (total + 1e-9) >= 0.10:
+        vis5_insight = (f"Teridentifikasi {int(slow_highipk)} alumni dengan IPK ≥3,5 yang "
+                        f"menyelesaikan studi melebihi {target_months} bulan. Anomali ini "
+                        "mengindikasikan adanya hambatan non-akademis, seperti kompleksitas riset "
+                        "atau keterbatasan aksesibilitas dosen pembimbing.")
+        vis5_reco = ("Departemen disarankan memfasilitasi mediasi antara mahasiswa dan dosen pembimbing "
+                     "yang bersangkutan, dengan fokus pada penyesuaian ruang lingkup penelitian "
+                     "agar selaras dengan standar akademik jenjang Sarjana.")
+    else:
+        vis5_insight = (f"Sebaran data alumni menunjukkan konsentrasi pada rentang nilai dan durasi studi "
+                        f"yang sesuai target, dengan rata-rata IPK {avg_ipk:.2f} dan lama studi {avg_study:.1f} bulan. "
+                        "Pola ini mencerminkan keselarasan antara capaian akademik dan efisiensi penyelesaian studi.")
+        vis5_reco = ("Pola sebaran alumni pada kuadran optimal ini dapat dijadikan acuan baku "
+                     "dalam perancangan jadwal pembimbingan dan penetapan target akademik "
+                     "bagi mahasiswa yang baru memulai tahap penulisan tugas akhir.")
+
+    insights = [vis1_insight, vis2_insight, vis3_insight, vis4_insight, vis5_insight]
+    recommendations = [vis1_reco, vis2_reco, vis3_reco, vis4_reco, vis5_reco]
+    return insights, recommendations
 
 
-def build_lecturer_insights(role_df: pd.DataFrame) -> tuple[list[str], list[str]]:
+def build_lecturer_insights(
+    role_df: pd.DataFrame,
+) -> tuple[list[str], list[str]]:
+    """Insight dan rekomendasi manual 3-kasus untuk 2 visualisasi Tab Dosen."""
     if role_df.empty:
         return (
             ["Tidak ada relasi dosen pada kombinasi filter saat ini."],
             ["Periksa kembali kombinasi filter agar analisis beban dosen dapat ditampilkan."],
         )
 
-    total_roles = int(role_df["role_count"].sum())
-    total_alumni = role_df["kelulusan_key"].nunique()
     unique_lecturers = role_df["dosen_key"].nunique()
+    total_roles = int(role_df["role_count"].sum())
     advisor_roles = int(role_df.loc[role_df["jenis_peran"].eq("Pembimbing"), "role_count"].sum())
     examiner_roles = int(role_df.loc[role_df["jenis_peran"].eq("Penguji"), "role_count"].sum())
+
     top_all = (
         role_df.groupby(["dosen_key", "nama_dosen_normalized"], as_index=False)
         .agg(jumlah_peran=("role_count", "sum"), jumlah_alumni=("kelulusan_key", "nunique"))
         .sort_values("jumlah_peran", ascending=False)
     )
-    top_lecturer = top_all.iloc[0]
-    concentration = (top_all.head(5)["jumlah_peran"].sum() / total_roles * 100) if total_roles else 0
-    role_balance = "pembimbing" if advisor_roles >= examiner_roles else "penguji"
+    avg_peran_per_dosen = float(top_all["jumlah_peran"].mean()) if not top_all.empty else 0
+    max_peran = int(top_all.iloc[0]["jumlah_peran"]) if not top_all.empty else 0
+    top_name = str(top_all.iloc[0]["nama_dosen_normalized"]) if not top_all.empty else "-"
+    overloaded = top_all[top_all["jumlah_peran"] >= avg_peran_per_dosen * 2.0]
+    underloaded = top_all[top_all["jumlah_peran"] <= avg_peran_per_dosen * 0.4]
+
+    # --- Vis 6: Scatter kuadran pembimbing vs penguji ---
+    if len(overloaded) >= 2:
+        vis6_insight = (f"Terdapat {len(overloaded)} dosen yang berada pada kuadran beban tinggi, "
+                        f"dengan jumlah peran yang melebihi dua kali rata-rata departemen ({avg_peran_per_dosen:.1f} peran/dosen). "
+                        "Kondisi ini berpotensi menurunkan kualitas bimbingan akibat keterbatasan alokasi waktu per mahasiswa.")
+        vis6_reco = (f"Departemen disarankan memberlakukan pembatasan penambahan mahasiswa bimbingan baru "
+                     f"bagi dosen dengan beban di atas ambang normal, termasuk {top_name}, "
+                     "hingga distribusi beban kerja kembali ke tingkat yang proporsional.")
+    elif len(underloaded) >= 2:
+        vis6_insight = (f"Terdapat {len(underloaded)} dosen yang berada pada kuadran beban rendah "
+                        "dengan tingkat keterlibatan dalam kegiatan pembimbingan maupun pengujian "
+                        "yang jauh di bawah rata-rata departemen, mengindikasikan optimalisasi sumber daya yang belum maksimal.")
+        vis6_reco = ("Departemen perlu mendistribusikan ulang kuota mahasiswa bimbingan dengan "
+                     "mengalihkan sebagian ke dosen berkapasitas rendah guna mengoptimalkan "
+                     "pemanfaatan keahlian seluruh tenaga pengajar yang tersedia.")
+    else:
+        vis6_insight = (f"Distribusi peran pembimbingan dan pengujian di antara {unique_lecturers} dosen "
+                        f"menunjukkan pola yang proporsional dengan rata-rata {avg_peran_per_dosen:.1f} peran per dosen. "
+                        "Tidak teridentifikasi adanya dominasi maupun ketimpangan beban yang signifikan.")
+        vis6_reco = ("Departemen disarankan mempertahankan mekanisme penugasan yang berlaku saat ini "
+                     "dan melakukan evaluasi distribusi beban secara berkala setiap semester "
+                     "untuk memastikan keseimbangan yang berkelanjutan.")
+
+    # --- Vis 7: Grouped bar Pembimbing 1 vs 2 ---
     advisor_positions = (
         role_df[role_df["jenis_peran"].eq("Pembimbing")]
         .groupby("urutan_peran", as_index=False)
         .agg(jumlah=("role_count", "sum"))
-        .sort_values("urutan_peran")
     )
     advisor_1 = int(advisor_positions.loc[advisor_positions["urutan_peran"].eq(1), "jumlah"].sum())
     advisor_2 = int(advisor_positions.loc[advisor_positions["urutan_peran"].eq(2), "jumlah"].sum())
+    ratio_pem = advisor_1 / (advisor_2 + 1e-9)
 
-    insights = [
-        f"Terdapat {total_roles} relasi peran dari {unique_lecturers} dosen untuk {total_alumni} alumni pada filter aktif.",
-        f"{top_lecturer['nama_dosen_normalized']} memiliki relasi terbanyak dengan {int(top_lecturer['jumlah_peran'])} peran pada {int(top_lecturer['jumlah_alumni'])} alumni.",
-        f"Lima dosen teratas menangani {concentration:.1f}% dari total relasi peran.",
-        f"Komposisi peran lebih dominan sebagai {role_balance}: {advisor_roles} pembimbing dan {examiner_roles} penguji.",
-        f"Peran pembimbing terdiri dari {advisor_1} relasi Pembimbing 1 dan {advisor_2} relasi Pembimbing 2 pada filter aktif.",
-    ]
-
-    recommendations = [
-        f"Evaluasi distribusi beban {top_lecturer['nama_dosen_normalized']} agar kualitas bimbingan dan pengujian tetap terjaga.",
-        "Gunakan konsentrasi lima dosen teratas sebagai dasar pemerataan penugasan pada periode berikutnya.",
-    ]
-    if advisor_roles > examiner_roles * 1.25:
-        recommendations.append("Seimbangkan kembali peran penguji agar evaluasi sidang tidak terlalu terkonsentrasi pada kelompok tertentu.")
-    elif examiner_roles > advisor_roles * 1.25:
-        recommendations.append("Seimbangkan kembali peran pembimbing agar pendampingan tugas akhir tidak tertinggal dari aktivitas pengujian.")
+    if ratio_pem >= 3.0:
+        vis7_insight = (f"Rasio relasi Pembimbing 1 terhadap Pembimbing 2 tercatat sangat tidak seimbang "
+                        f"({advisor_1} berbanding {advisor_2}). Kondisi ini menunjukkan ketergantungan "
+                        "departemen yang tinggi pada sejumlah kecil dosen senior sebagai pembimbing utama, "
+                        "yang berisiko terhadap kesinambungan proses bimbingan.")
+        vis7_reco = ("Departemen perlu memberlakukan pembatasan jumlah mahasiswa yang dapat dibimbing "
+                     "oleh satu dosen sebagai Pembimbing 1, serta memberikan kesempatan kepada "
+                     "dosen dengan pengalaman memadai untuk mengemban peran utama secara bertahap.")
+    elif ratio_pem <= 0.5:
+        vis7_insight = (f"Terdapat anomali distribusi peran: jumlah relasi Pembimbing 2 ({advisor_2}) "
+                        f"melampaui Pembimbing 1 ({advisor_1}). Kondisi ini dapat mengindikasikan "
+                        "keterbatasan jumlah dosen yang memenuhi kualifikasi atau mendapat kepercayaan "
+                        "untuk mengemban peran pembimbing utama.")
+        vis7_reco = ("Departemen perlu mengembangkan program pengembangan kapasitas bagi dosen "
+                     "yang berpotensi mengemban peran Pembimbing 1, khususnya pada topik penelitian "
+                     "yang bersifat terapan dan sesuai dengan bidang keahlian mereka.")
     else:
-        recommendations.append("Pertahankan keseimbangan peran pembimbing dan penguji karena komposisinya relatif proporsional.")
-    if advisor_1 > advisor_2 * 1.5 and advisor_2 > 0:
-        recommendations.append("Tinjau distribusi Pembimbing 2 karena relasinya jauh lebih sedikit dibanding Pembimbing 1.")
-    elif advisor_2 > advisor_1 * 1.5 and advisor_1 > 0:
-        recommendations.append("Tinjau distribusi Pembimbing 1 karena relasinya jauh lebih sedikit dibanding Pembimbing 2.")
-    else:
-        recommendations.append("Pertahankan komposisi Pembimbing 1 dan Pembimbing 2 karena distribusinya relatif seimbang.")
-    recommendations.append("Gunakan chart pembimbing untuk mengidentifikasi dosen yang terlalu sering berada pada posisi pembimbing tertentu.")
+        vis7_insight = (f"Distribusi antara Pembimbing 1 ({advisor_1} relasi) dan Pembimbing 2 ({advisor_2} relasi) "
+                        "menunjukkan proporsi yang seimbang dan konstruktif. Pola ini mencerminkan "
+                        "sinergi yang baik antara dosen senior dan junior dalam ekosistem pembimbingan tugas akhir.")
+        vis7_reco = ("Departemen disarankan mempertahankan pola pemasangan dosen pembimbing yang berlaku "
+                     "dan mendokumentasikan kombinasi pembimbingan yang efektif sebagai referensi "
+                     "penugasan pada periode akademik berikutnya.")
 
-    return insights[:5], recommendations[:5]
+    insights = [vis6_insight, vis7_insight]
+    recommendations = [vis6_reco, vis7_reco]
+    return insights, recommendations
 
 
-def build_nlp_insights(df_nlp: pd.DataFrame, target_months: int) -> tuple[list[str], list[str]]:
+def build_nlp_insights(
+    df_nlp: pd.DataFrame,
+    target_months: int,
+) -> tuple[list[str], list[str]]:
+    """Insight dan rekomendasi manual 3-kasus untuk 4 visualisasi Tab Kemiripan TA."""
     if df_nlp.empty:
         return (
             [f"Tidak ada data tugas akhir pada filter aktif dengan lama studi hingga {target_months} bulan."],
@@ -2002,41 +2143,134 @@ def build_nlp_insights(df_nlp: pd.DataFrame, target_months: int) -> tuple[list[s
     scored_df = df_nlp.dropna(subset=["skor_kemiripan_tertinggi"]).copy()
     if scored_df.empty:
         return (
-            [f"Data tugas akhir tersedia, tetapi skor kemiripan belum tersedia pada filter lama studi hingga {target_months} bulan."],
-            ["Lengkapi atau sinkronkan atribut similarity agar insight kemiripan dapat dihitung untuk filter aktif."],
+            [f"Data tugas akhir tersedia, tetapi skor kemiripan belum dihitung pada filter ini."],
+            ["Sinkronkan ulang database NLP (jalankan load_star_schema.py) agar skor similarity tersedia."],
         )
 
-    avg_similarity = scored_df["skor_kemiripan_tertinggi"].mean()
+    total_ta = len(scored_df)
+    avg_similarity = float(scored_df["skor_kemiripan_tertinggi"].mean())
     uniqueness_index = (1 - avg_similarity) * 100
     redundant_count = int(scored_df["skor_kemiripan_tertinggi"].ge(0.85).sum())
     review_count = int(scored_df["skor_kemiripan_tertinggi"].between(0.70, 0.8499).sum())
-    category_counts = scored_df["kategori_keunikan"].value_counts()
-    dominant_category = category_counts.index[0] if not category_counts.empty else "-"
+    redundant_pct = redundant_count / (total_ta + 1e-9) * 100
+    review_pct = review_count / (total_ta + 1e-9) * 100
     keywords = top_keywords(df_nlp["Judul Final"], 5)
+    top_kw = str(keywords.iloc[0]["Kata"]) if not keywords.empty else "-"
+    top_kw_freq = int(keywords.iloc[0]["Frekuensi"]) if not keywords.empty else 0
 
-    insights = [
-        f"Filter aktif menampilkan {len(df_nlp)} judul tugas akhir dengan indeks keunikan {uniqueness_index:.1f}/100.",
-        f"Rata-rata similarity tertinggi berada di {avg_similarity * 100:.1f}%, sehingga kedekatan judul berada pada kategori {dominant_category}.",
-        f"Terdapat {redundant_count} judul tidak unik dan {review_count} judul perlu review pada ambang similarity yang digunakan.",
-        f"Analisis ini sudah dibatasi pada alumni dengan lama studi hingga {target_months} bulan.",
-    ]
-    if not keywords.empty:
-        top_keyword = keywords.iloc[0]
-        insights.append(f"Kata kunci paling dominan adalah '{top_keyword['Kata']}' dengan {int(top_keyword['Frekuensi'])} kemunculan.")
-
-    recommendations = []
-    if redundant_count:
-        recommendations.append("Lakukan review substansi pada judul berkategori tidak unik sebelum periode pengajuan tugas akhir berikutnya.")
+    # --- Vis 8: Histogram distribusi similarity ---
+    if redundant_pct >= 15:
+        vis8_insight = (f"Sebesar {redundant_pct:.1f}% dari total judul tugas akhir ({redundant_count} judul) "
+                        "melampaui ambang batas kesamaan kritis (≥0,85). Kondisi ini mengindikasikan "
+                        "bahwa proporsi signifikan pengajuan judul bersifat redundan secara substansi "
+                        "terhadap karya akademik yang telah ada sebelumnya.")
+        vis8_reco = ("Departemen perlu menetapkan kebijakan penolakan terhadap pengajuan judul "
+                     "yang hanya memodifikasi lokasi studi kasus tanpa perubahan metodologi "
+                     "yang substantif, serta mewajibkan differensiasi kontribusi ilmiah yang jelas "
+                     "sebagai syarat penerbitan surat keputusan pembimbing.")
+    elif review_pct >= 30:
+        vis8_insight = (f"Sebesar {review_pct:.1f}% judul tugas akhir ({review_count} judul) berada pada "
+                        "zona kuning kemiripan (0,70–0,84), mengindikasikan adanya tumpang tindih "
+                        "konseptual yang perlu mendapat perhatian sebelum meningkat menjadi redundansi.")
+        vis8_reco = ("Departemen disarankan mengadakan kajian internal bersama tim dosen penguji "
+                     "untuk menelaah dan memfilter proposal yang berada pada zona risiko kemiripan "
+                     "sebelum mendapat persetujuan resmi untuk dilanjutkan.")
     else:
-        recommendations.append("Pertahankan proses kurasi judul karena tidak ada judul yang melewati ambang tidak unik pada filter aktif.")
-    if review_count:
-        recommendations.append("Buat daftar pemantauan untuk judul pada kategori perlu review agar kemiripan konseptual tidak meningkat menjadi redundan.")
-    if not keywords.empty:
-        recommendations.append(f"Evaluasi kejenuhan topik berbasis kata kunci '{keywords.iloc[0]['Kata']}' dan dorong variasi tema riset baru.")
-    recommendations.append("Gunakan peta PCA untuk mengidentifikasi klaster judul yang rapat sebagai bahan diskusi topik prioritas departemen.")
-    recommendations.append(f"Bandingkan hasil ini dengan target lama studi lain untuk melihat apakah kemiripan topik berkaitan dengan alumni yang selesai lebih cepat.")
+        vis8_insight = (f"Mayoritas judul tugas akhir menunjukkan tingkat orisinalitas yang memadai, "
+                        f"dengan rata-rata skor kemiripan {avg_similarity * 100:.1f}%. Distribusi ini "
+                        "mengindikasikan bahwa mekanisme kurasi judul yang diterapkan berjalan efektif "
+                        "dalam menjaga standar kebaruan penelitian.")
+        vis8_reco = ("Departemen disarankan mempertahankan sistem verifikasi judul berbasis kecerdasan "
+                     "buatan yang telah berjalan, dan mengkomunikasikan hasilnya secara transparan "
+                     "kepada mahasiswa sebagai bagian dari proses seleksi topik penelitian.")
 
-    return insights[:5], recommendations[:5]
+    # --- Vis 9: Gauge indeks keunikan ---
+    if uniqueness_index < 40:
+        vis9_insight = (f"Indeks keunikan dataset tugas akhir berada pada nilai kritis: {uniqueness_index:.1f}/100 (zona merah). "
+                        "Kondisi ini mengindikasikan saturasi topik penelitian yang signifikan, "
+                        "di mana kontribusi ilmiah baru dari karya tugas akhir mahasiswa dinilai sangat terbatas.")
+        vis9_reco = ("Departemen perlu segera menyusun dan mendistribusikan daftar topik yang "
+                     "dinyatakan jenuh atau tidak lagi memenuhi syarat kebaruan penelitian, "
+                     "guna memandu mahasiswa dalam pemilihan tema yang lebih inovatif dan relevan.")
+    elif uniqueness_index >= 70:
+        vis9_insight = (f"Indeks keunikan dataset tugas akhir berada pada level yang baik: {uniqueness_index:.1f}/100 (zona hijau). "
+                        "Capaian ini mencerminkan kualitas orisinalitas penelitian yang terjaga "
+                        "serta keragaman tema akademik yang positif di lingkungan departemen.")
+        vis9_reco = ("Departemen disarankan mempertahankan ekosistem penelitian yang kondusif ini "
+                     "melalui penyediaan referensi jurnal internasional terkini secara berkelanjutan "
+                     "sebagai sumber inspirasi bagi mahasiswa dalam pengembangan topik penelitian.")
+    else:
+        vis9_insight = (f"Indeks keunikan dataset tugas akhir berada pada level moderat: {uniqueness_index:.1f}/100 (zona kuning). "
+                        "Terdapat indikasi awal terjadinya pengulangan tema penelitian yang perlu "
+                        "diantisipasi sebelum mencapai kondisi saturasi yang merugikan kualitas akademik.")
+        vis9_reco = ("Departemen perlu mendorong eksplorasi topik penelitian yang lebih inovatif "
+                     "dengan menyediakan pemetaan tren riset internasional terkini sebagai referensi, "
+                     "serta memberikan insentif akademik bagi pengajuan topik pada bidang yang belum banyak dieksplorasi.")
+
+    # --- Vis 10: Scatter PCA kedekatan judul ---
+    scatter_df = df_nlp.dropna(subset=["pca_x", "pca_y"]).copy()
+    if not scatter_df.empty:
+        # Estimate cluster density via standard deviation of PCA coords
+        pca_std = float(scatter_df[["pca_x", "pca_y"]].std().mean())
+        if pca_std < 0.3:
+            vis10_insight = ("Koordinat PCA menunjukkan konsentrasi titik-titik judul tugas akhir "
+                             "pada area yang sangat terbatas, mengindikasikan homogenitas tema penelitian "
+                             "yang tinggi dan potensi monopoli topik pada rumpun keilmuan tertentu.")
+            vis10_reco = ("Departemen perlu membatasi kuota pengajuan tugas akhir pada klaster topik "
+                          "yang telah mencapai titik jenuh dan secara aktif mengarahkan mahasiswa "
+                          "ke rumpun penelitian alternatif yang memiliki potensi kontribusi ilmiah lebih tinggi.")
+        elif pca_std >= 0.7:
+            vis10_insight = ("Peta koordinat PCA memperlihatkan pembentukan klaster-klaster titik "
+                             "yang tersebar pada berbagai segmen, mengindikasikan kemunculan tren "
+                             "penelitian baru yang mulai berkembang di luar topik-topik yang sudah mapan.")
+            vis10_reco = ("Departemen perlu mengidentifikasi klaster penelitian yang baru terbentuk "
+                          "dan menugaskan dosen dengan keahlian yang relevan untuk mempersiapkan "
+                          "kapasitas pembimbingan pada bidang-bidang tersebut secara proaktif.")
+        else:
+            vis10_insight = ("Distribusi koordinat PCA menunjukkan persebaran judul tugas akhir "
+                             "yang merata pada berbagai segmen tematik, mencerminkan keseimbangan "
+                             "antar rumpun keilmuan yang menjadi cakupan penelitian departemen.")
+            vis10_reco = ("Peta sebaran PCA ini dapat dimanfaatkan sebagai bukti dokumentasi "
+                          "dalam instrumen akreditasi untuk menunjukkan keluasan cakupan "
+                          "dan keberagaman payung penelitian yang dikelola departemen.")
+    else:
+        vis10_insight = "Koordinat PCA belum tersedia. Diperlukan proses komputasi ulang skrip NLP untuk menghasilkan representasi vektor semantik."
+        vis10_reco = "Lakukan sinkronisasi basis data NLP agar visualisasi peta klaster judul tugas akhir dapat ditampilkan dengan akurat."
+
+    # --- Vis 11: Kata kunci dominan ---
+    is_hightech = any(
+        kw in ["deep", "learning", "machine", "neural", "sbert", "transformer", "blockchain", "iot"]
+        for kw in (keywords["Kata"].str.lower().tolist() if not keywords.empty else [])
+    )
+    is_basic = top_kw.lower() in ["web", "android", "aplikasi", "sistem", "website", "mobile"]
+    if is_basic:
+        vis11_insight = (f"Kata kunci yang paling dominan dalam judul tugas akhir adalah '{top_kw}' "
+                         f"({top_kw_freq} kemunculan), mengindikasikan orientasi penelitian mahasiswa "
+                         "yang masih didominasi oleh pengembangan aplikasi berbasis teknologi umum "
+                         "tanpa integrasi metodologi analisis yang lebih komprehensif.")
+        vis11_reco = ("Departemen perlu mendorong mahasiswa untuk mengintegrasikan metode analisis, "
+                      "algoritma optimasi, atau kerangka evaluasi yang lebih terstruktur dalam "
+                      "rancangan penelitian, sehingga kontribusi ilmiah tugas akhir tidak terbatas "
+                      "pada aspek implementasi teknis semata.")
+    elif is_hightech:
+        vis11_insight = (f"Kata kunci berteknologi tinggi mendominasi judul tugas akhir—'{top_kw}' "
+                         f"tercatat {top_kw_freq} kali, menunjukkan bahwa orientasi penelitian mahasiswa "
+                         "telah selaras dengan perkembangan teknologi mutakhir dan standar riset industri modern.")
+        vis11_reco = ("Departemen dapat memanfaatkan profil kata kunci penelitian yang progresif ini "
+                      "sebagai materi komunikasi strategis dalam promosi program studi kepada calon "
+                      "mahasiswa dan mitra industri teknologi berbasis inovasi.")
+    else:
+        vis11_insight = (f"Profil kata kunci tugas akhir menunjukkan distribusi yang seimbang antara "
+                         f"terminologi metodologis dan objek implementasi—'{top_kw}' merupakan kata kunci "
+                         f"paling sering muncul ({top_kw_freq} kali). Pola ini mencerminkan keragaman "
+                         "orientasi penelitian yang proporsional di departemen.")
+        vis11_reco = ("Departemen dapat menggunakan pemetaan kata kunci ini sebagai landasan evaluasi "
+                      "relevansi kurikulum, khususnya dalam menilai kesesuaian mata kuliah pilihan "
+                      "dengan tren topik penelitian tugas akhir yang aktual.")
+
+    insights = [vis8_insight, vis9_insight, vis10_insight, vis11_insight]
+    recommendations = [vis8_reco, vis9_reco, vis10_reco, vis11_reco]
+    return insights, recommendations
 
 
 def academic_dashboard(df: pd.DataFrame, target_months: int, target_ipk: float) -> None:
@@ -2635,6 +2869,100 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
     q_x_left = mean_pembimbing * 0.5 if mean_pembimbing > 0 else 0.1
     q_x_right = x_max * 0.8 if x_max > 0 else 1.0
 
+    # Calculate consistent discrete quadrant category for each point based on proportion of circle area
+    import math
+    def classify_quadrant(pembimbing, penguji, total_peran, mean_pembimbing, mean_penguji, max_pembimbing, max_penguji, max_peran):
+        x = float(pembimbing)
+        y = float(penguji)
+        xm = float(mean_pembimbing)
+        ym = float(mean_penguji)
+        
+        rx = float(max_pembimbing) if max_pembimbing > 0 else 1.0
+        ry = float(max_penguji) if max_penguji > 0 else 1.0
+        
+        x_norm = x / rx
+        y_norm = y / ry
+        xm_norm = xm / rx
+        ym_norm = ym / ry
+        
+        max_r = 0.035
+        r_norm = max_r * (total_peran / max_peran)**0.5 if max_peran > 0 else 0.01
+        
+        q_counts = [0, 0, 0, 0] # Q1 (Top-Right), Q2 (Top-Left), Q3 (Bottom-Left), Q4 (Bottom-Right)
+        
+        # Sample points on a polar grid to represent the area of the circle
+        for r_step in [0.0] + [r_norm * (i / 10.0) for i in range(1, 11)]:
+            sectors = 1 if r_step == 0.0 else int(24 * (r_step / r_norm))
+            for j in range(sectors):
+                angle = (2 * math.pi * j) / sectors
+                px_norm = x_norm + r_step * math.cos(angle)
+                py_norm = y_norm + r_step * math.sin(angle)
+                
+                is_right = px_norm >= xm_norm
+                is_top = py_norm >= ym_norm
+                
+                if is_right and is_top:
+                    q_counts[0] += 1
+                elif (not is_right) and is_top:
+                    q_counts[1] += 1
+                elif (not is_right) and (not is_top):
+                    q_counts[2] += 1
+                else:
+                    q_counts[3] += 1
+                    
+        max_count = max(q_counts)
+        candidates = [idx for idx, count in enumerate(q_counts) if count == max_count]
+        
+        if len(candidates) == 1:
+            best_q = candidates[0]
+        else:
+            # Tie breaker: use center point's position
+            is_right = x_norm >= xm_norm
+            is_top = y_norm >= ym_norm
+            if is_right and is_top:
+                best_q = 0
+            elif (not is_right) and is_top:
+                best_q = 1
+            elif (not is_right) and (not is_top):
+                best_q = 2
+            else:
+                best_q = 3
+                
+        categories = [
+            "Dominan Keduanya",
+            "Dominan Menguji",
+            "Beban Rendah",
+            "Dominan Membimbing"
+        ]
+        return categories[best_q]
+
+    if not pivot_scatter.empty:
+        max_pem = pivot_scatter["Pembimbing"].max()
+        max_peng = pivot_scatter["Penguji"].max()
+        max_peran = pivot_scatter["jumlah_peran"].max()
+        pivot_scatter["kategori_kuadran"] = pivot_scatter.apply(
+            lambda r: classify_quadrant(
+                r["Pembimbing"],
+                r["Penguji"],
+                r["jumlah_peran"],
+                mean_pembimbing,
+                mean_penguji,
+                max_pem,
+                max_peng,
+                max_peran
+            ),
+            axis=1
+        )
+    else:
+        pivot_scatter["kategori_kuadran"] = []
+
+    color_map = {
+        "Dominan Keduanya": "#10b981",    # Emerald Green
+        "Dominan Menguji": "#3b82f6",     # Vibrant Blue
+        "Beban Rendah": "#64748b",        # Slate Grey
+        "Dominan Membimbing": "#f59e0b",  # Amber Orange
+    }
+
     col_left, col_right = st.columns([1.2, 1])
     with col_left:
         with st.container(border=True):
@@ -2642,71 +2970,145 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
                 pivot_scatter,
                 x="Pembimbing",
                 y="Penguji",
-                text="nama_dosen_normalized",
                 size="jumlah_peran",
-                size_max=28,
-                color="jumlah_peran",
-                color_continuous_scale=["#b8c5a3", "#4f7f70", "#114b36"],
+                size_max=32,
+                color="kategori_kuadran",
+                color_discrete_map=color_map,
+                category_orders={
+                    "kategori_kuadran": [
+                        "Dominan Keduanya",
+                        "Dominan Menguji",
+                        "Beban Rendah",
+                        "Dominan Membimbing"
+                    ]
+                },
                 title="Peta Peran Dosen: Pembimbing vs Penguji (Scatter Kuadran)",
                 labels={
                     "Pembimbing": "Jumlah Peran Pembimbing",
                     "Penguji": "Jumlah Peran Penguji",
+                    "kategori_kuadran": "Kategori Kuadran",
                     "jumlah_peran": "Total Peran",
                     "nama_dosen_normalized": "Dosen",
                 },
-                hover_data={"nama_dosen_normalized": True, "Pembimbing": True, "Penguji": True, "jumlah_alumni": True},
+                custom_data=["nama_dosen_normalized", "jumlah_alumni", "kategori_kuadran"],
             )
             fig.update_traces(
-                textposition="top center",
-                textfont=dict(size=8, color="#1c2826"),
-                marker=dict(opacity=0.85, line=dict(width=1, color="#ffffff")),
-            )
-            # Override hovertemplate - customdata order from hover_data dict:
-            # hover_data cols not in x/y: [nama_dosen_normalized, jumlah_alumni]
-            # so customdata[0]=nama_dosen_normalized, customdata[1]=jumlah_alumni
-            fig.update_traces(
+                marker=dict(opacity=0.82, line=dict(width=1.5, color="#ffffff")),
                 hovertemplate=(
                     "<b>%{customdata[0]}</b><br>"
+                    "Kategori: %{customdata[2]}<br>"
                     "Peran Pembimbing: %{x}<br>"
                     "Peran Penguji: %{y}<br>"
                     "Alumni Unik: %{customdata[1]}<extra></extra>"
-                )
+                ),
             )
+            # Add colored quadrant background rectangles (soft 5% opacity)
+            # Kuadran II: Dominan Menguji (Top-Left)
+            fig.add_shape(
+                type="rect",
+                xref="x", yref="y",
+                x0=-10, y0=mean_penguji,
+                x1=mean_pembimbing, y1=y_max * 1.2,
+                fillcolor="rgba(59, 130, 246, 0.05)",
+                line=dict(width=0),
+                layer="below"
+            )
+            # Kuadran I: Dominan Keduanya (Top-Right)
+            fig.add_shape(
+                type="rect",
+                xref="x", yref="y",
+                x0=mean_pembimbing, y0=mean_penguji,
+                x1=x_max * 1.2, y1=y_max * 1.2,
+                fillcolor="rgba(16, 185, 129, 0.05)",
+                line=dict(width=0),
+                layer="below"
+            )
+            # Kuadran III: Beban Rendah (Bottom-Left)
+            fig.add_shape(
+                type="rect",
+                xref="x", yref="y",
+                x0=-10, y0=-10,
+                x1=mean_pembimbing, y1=mean_penguji,
+                fillcolor="rgba(100, 116, 139, 0.05)",
+                line=dict(width=0),
+                layer="below"
+            )
+            # Kuadran IV: Dominan Membimbing (Bottom-Right)
+            fig.add_shape(
+                type="rect",
+                xref="x", yref="y",
+                x0=mean_pembimbing, y0=-10,
+                x1=x_max * 1.2, y1=mean_penguji,
+                fillcolor="rgba(245, 158, 11, 0.05)",
+                line=dict(width=0),
+                layer="below"
+            )
+
+            # Add clean, bold name annotations per point inside high-contrast badges (no text= in px.scatter to avoid overlap)
+            for _, row in pivot_scatter.iterrows():
+                fig.add_annotation(
+                    x=float(row["Pembimbing"]),
+                    y=float(row["Penguji"]),
+                    text=f"<b>{row['nama_dosen_normalized']}</b>",
+                    showarrow=False,
+                    yshift=16,
+                    font=dict(size=8, color="#0f172a"),
+                    bgcolor="rgba(255,255,255,0.92)",
+                    bordercolor="#cbd5e1",
+                    borderwidth=1,
+                    borderpad=2.5,
+                )
             # Quadrant lines at mean
             fig.add_vline(
                 x=mean_pembimbing,
                 line_dash="dash",
                 line_color="#1f644e",
                 line_width=1.5,
-                annotation_text=f"Rata-rata Pem. ({mean_pembimbing:.1f})",
-                annotation_position="top right",
-                annotation_font=dict(size=10, color="#1f644e"),
             )
             fig.add_hline(
                 y=mean_penguji,
                 line_dash="dash",
                 line_color="#b87333",
                 line_width=1.5,
-                annotation_text=f"Rata-rata Penguji ({mean_penguji:.1f})",
-                annotation_position="bottom right",
-                annotation_font=dict(size=10, color="#b87333"),
             )
-            # Quadrant labels (safe positions)
-            quadrant_annotations = [
-                dict(x=q_x_left, y=q_y_top, text="🔵 Lebih banyak menguji", showarrow=False,
-                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
-                dict(x=q_x_right, y=q_y_top, text="⭐ Dominan di keduanya", showarrow=False,
-                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
-                dict(x=q_x_left, y=q_y_bot, text="⚪ Beban rendah", showarrow=False,
-                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
-                dict(x=q_x_right, y=q_y_bot, text="🟢 Lebih banyak membimbing", showarrow=False,
-                     font=dict(size=9, color="#64748b"), xref="x", yref="y"),
-            ]
+            # Quadrant axis labels inside plot area via paper-ref annotations (clean and neutral)
+            q_label_style = dict(showarrow=False, font=dict(size=9, color="#94a3b8"),
+                                 bgcolor="rgba(248,250,252,0.75)", borderpad=2)
+            fig.add_annotation(xref="paper", yref="paper", x=0.02, y=0.98,
+                               text="Kuadran II: Dominan Menguji", **q_label_style)
+            fig.add_annotation(xref="paper", yref="paper", x=0.98, y=0.98,
+                               text="Kuadran I: Dominan Keduanya", xanchor="right", **q_label_style)
+            fig.add_annotation(xref="paper", yref="paper", x=0.02, y=0.02,
+                               text="Kuadran III: Beban Rendah", yanchor="bottom", **q_label_style)
+            fig.add_annotation(xref="paper", yref="paper", x=0.98, y=0.02,
+                               text="Kuadran IV: Dominan Membimbing", xanchor="right", yanchor="bottom",
+                               **q_label_style)
+            # Mean value annotations on axes
+            fig.add_annotation(
+                xref="x", yref="paper", x=mean_pembimbing, y=1.0,
+                text=f"Rata Pem. ({mean_pembimbing:.1f})",
+                showarrow=False, yanchor="bottom",
+                font=dict(size=9, color="#1f644e"),
+                bgcolor="rgba(255,255,255,0.8)", borderpad=2,
+            )
+            fig.add_annotation(
+                xref="paper", yref="y", x=1.0, y=mean_penguji,
+                text=f"Rata Penguji ({mean_penguji:.1f})",
+                showarrow=False, xanchor="left",
+                font=dict(size=9, color="#b87333"),
+                bgcolor="rgba(255,255,255,0.8)", borderpad=2,
+            )
             fig.update_layout(
-                annotations=list(fig.layout.annotations) + quadrant_annotations,
-                height=520,
-                margin=dict(l=10, r=10, t=55, b=10),
-                coloraxis_showscale=False,
+                height=560,
+                margin=dict(l=10, r=10, t=55, b=65),
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.12,
+                    xanchor="center",
+                    x=0.5,
+                    title=dict(text="Legenda Kuadran:")
+                )
             )
             style_plotly_fig(fig)
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -2726,6 +3128,12 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
             )
             # Build grouped (not stacked) horizontal bar with value labels
             advisor_sorted = advisor_position.sort_values(["jumlah_peran", "Posisi"], ascending=[True, True])
+            # Get unique sorted dosen names for consistent y-axis order
+            dosen_order = (
+                advisor_position.groupby("nama_dosen_normalized", as_index=False)
+                .agg(total=("jumlah", "sum"))
+                .sort_values("total", ascending=True)["nama_dosen_normalized"].tolist()
+            )
             fig = go.Figure()
             colors = {"Pembimbing 1": "#114b36", "Pembimbing 2": "#5b7894"}
             for posisi in ["Pembimbing 1", "Pembimbing 2"]:
@@ -2737,9 +3145,11 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
                     orientation="h",
                     marker_color=colors.get(posisi, "#114b36"),
                     text=subset["jumlah"].astype(int).astype(str),
-                    textposition="outside",
-                    textfont=dict(size=10, color="#1c2826"),
+                    textposition="inside",
+                    insidetextanchor="middle",
+                    textfont=dict(size=10, color="#ffffff"),
                     hovertemplate="<b>%{y}</b><br>" + posisi + ": %{x}<extra></extra>",
+                    constraintext="none",
                 ))
             try:
                 fig.update_layout(barcornerradius=5)
@@ -2749,10 +3159,13 @@ def lecturer_dashboard_from_roles(role_df: pd.DataFrame) -> None:
             fig.update_layout(
                 title="Distribusi Dosen Pembimbing 1 dan 2",
                 height=520,
-                margin=dict(l=10, r=60, t=55, b=10),
+                margin=dict(l=10, r=30, t=55, b=50),
                 barmode="group",
-                yaxis={"categoryorder": "total ascending"},
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                bargap=0.25,
+                bargroupgap=0.08,
+                yaxis=dict(categoryorder="array", categoryarray=dosen_order),
+                legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
+                uniformtext=dict(mode="hide", minsize=8),
             )
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 

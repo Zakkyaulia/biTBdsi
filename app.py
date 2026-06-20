@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import datetime
 import html
+import io
 import os
 import re
 import unicodedata
@@ -44,6 +45,116 @@ PERIODE_FILTER_OPTIONS = [
     ("WISUDA V", "V", "", "#1f644e"),
     ("WISUDA VI", "VI", "", "#1f644e"),
 ]
+
+TENDIK_UPLOAD_FIELDS = [
+    {
+        "key": "nim",
+        "label": "NIM",
+        "required": True,
+        "example": "2011521001",
+        "note": "Wajib 10 angka. Formatkan sebagai Text agar angka awal tidak hilang.",
+        "aliases": ["nim", "nomorindukmahasiswa"],
+    },
+    {
+        "key": "nama",
+        "label": "Nama",
+        "required": True,
+        "example": "Fitrah Annisa Sari",
+        "note": "Nama lengkap mahasiswa.",
+        "aliases": ["nama", "namalengkap", "namamahasiswa"],
+    },
+    {
+        "key": "judul_ta",
+        "label": "Judul Tugas Akhir",
+        "required": True,
+        "example": "Sistem Informasi Monitoring Alumni Departemen Sistem Informasi",
+        "note": "Judul tugas akhir lengkap.",
+        "aliases": ["judultugasakhir", "judulta", "judul", "tugasakhir"],
+    },
+    {
+        "key": "tanggal_lulus",
+        "label": "Tanggal Lulus",
+        "required": True,
+        "example": "2026-03-14",
+        "note": "Gunakan format YYYY-MM-DD, contoh 2026-03-14.",
+        "aliases": ["tanggallulus", "tgllulus", "tanggalyudisium", "tglyudisium"],
+    },
+    {
+        "key": "ipk",
+        "label": "IPK",
+        "required": True,
+        "example": "3.50",
+        "note": "Angka 0 sampai 4. Boleh memakai titik atau koma desimal.",
+        "aliases": ["ipk", "ipklulus"],
+    },
+    {
+        "key": "lama_studi",
+        "label": "Lama Studi",
+        "required": True,
+        "example": "48",
+        "note": "Jumlah bulan masa studi, contoh 48.",
+        "aliases": ["lamastudi", "lamastudibulan", "masastudi", "masastudibulan"],
+    },
+    {
+        "key": "periode_wisuda",
+        "label": "Periode Wisuda",
+        "required": True,
+        "example": "WISUDA I",
+        "note": "Pilih WISUDA I sampai WISUDA VI.",
+        "aliases": ["periodewisuda", "periode"],
+    },
+    {
+        "key": "tahun_wisuda",
+        "label": "Tahun Wisuda",
+        "required": True,
+        "example": "2026",
+        "note": "Tahun 4 angka.",
+        "aliases": ["tahunwisuda", "tahun"],
+    },
+    {
+        "key": "pembimbing_1",
+        "label": "Pembimbing 1",
+        "required": False,
+        "example": "Dwi Welly Sukma Nirad",
+        "note": "Opsional. Isi nama dosen jika tersedia.",
+        "aliases": ["pembimbing1", "dosenpembimbing1", "pembimbingutama"],
+    },
+    {
+        "key": "pembimbing_2",
+        "label": "Pembimbing 2",
+        "required": False,
+        "example": "Fajril Akbar",
+        "note": "Opsional. Isi nama dosen jika tersedia.",
+        "aliases": ["pembimbing2", "dosenpembimbing2", "pembimbingpendamping"],
+    },
+    {
+        "key": "penguji_1",
+        "label": "Dosen Penguji 1",
+        "required": False,
+        "example": "Hafizah Hanim",
+        "note": "Opsional. Isi nama dosen jika tersedia.",
+        "aliases": ["dosenpenguji1", "penguji1"],
+    },
+    {
+        "key": "penguji_2",
+        "label": "Dosen Penguji 2",
+        "required": False,
+        "example": "Rahmatika Pratama S",
+        "note": "Opsional. Isi nama dosen jika tersedia.",
+        "aliases": ["dosenpenguji2", "penguji2"],
+    },
+    {
+        "key": "penguji_3",
+        "label": "Dosen Penguji 3",
+        "required": False,
+        "example": "Hasdi Putra",
+        "note": "Opsional. Isi nama dosen jika tersedia.",
+        "aliases": ["dosenpenguji3", "penguji3"],
+    },
+]
+
+TENDIK_REQUIRED_KEYS = [field["key"] for field in TENDIK_UPLOAD_FIELDS if field["required"]]
+TENDIK_FIELD_LABELS = {field["key"]: field["label"] for field in TENDIK_UPLOAD_FIELDS}
 
 MONTH_MAP = {
     "januari": "January",
@@ -1466,7 +1577,13 @@ def validate_manual_record(nim: str, nama: str, judul: str, ipk_text: str) -> tu
 def parse_tanggal_lulus(value: object) -> pd.Timestamp:
     if pd.isna(value):
         return pd.NaT
+    if isinstance(value, (datetime.date, datetime.datetime, pd.Timestamp, np.datetime64)):
+        return pd.to_datetime(value, errors="coerce")
     text = str(value).strip()
+    if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", text):
+        parsed = pd.to_datetime(text, format="%Y-%m-%d", errors="coerce")
+        if not pd.isna(parsed):
+            return parsed
     lowered = text.lower()
     for indo, english in MONTH_MAP.items():
         lowered = re.sub(rf"\b{indo}\b", english, lowered, flags=re.IGNORECASE)
@@ -1474,6 +1591,306 @@ def parse_tanggal_lulus(value: object) -> pd.Timestamp:
     if pd.isna(parsed):
         parsed = pd.to_datetime(text, dayfirst=True, errors="coerce")
     return parsed
+
+
+def normalize_upload_header(value: object) -> str:
+    text = str(value).strip().lower()
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def map_tendik_upload_columns(columns: Iterable[object]) -> dict[str, object]:
+    alias_map: dict[str, str] = {}
+    for field in TENDIK_UPLOAD_FIELDS:
+        for alias in [field["label"], *field["aliases"]]:
+            alias_map[normalize_upload_header(alias)] = field["key"]
+
+    mapped_cols: dict[str, object] = {}
+    for col in columns:
+        norm = normalize_upload_header(col)
+        key = alias_map.get(norm)
+        if key is None:
+            if "nim" in norm:
+                key = "nim"
+            elif norm in {"nama", "namalengkap", "namamahasiswa"}:
+                key = "nama"
+            elif "judul" in norm:
+                key = "judul_ta"
+            elif "tanggal" in norm or "tgl" in norm:
+                key = "tanggal_lulus"
+            elif "ipk" in norm:
+                key = "ipk"
+            elif "lama" in norm or "masa" in norm:
+                key = "lama_studi"
+            elif "periode" in norm:
+                key = "periode_wisuda"
+            elif "tahun" in norm:
+                key = "tahun_wisuda"
+            elif "pembimbing" in norm and "1" in norm:
+                key = "pembimbing_1"
+            elif "pembimbing" in norm and "2" in norm:
+                key = "pembimbing_2"
+            elif "penguji" in norm and "1" in norm:
+                key = "penguji_1"
+            elif "penguji" in norm and "2" in norm:
+                key = "penguji_2"
+            elif "penguji" in norm and "3" in norm:
+                key = "penguji_3"
+
+        if key is not None and key not in mapped_cols:
+            mapped_cols[key] = col
+    return mapped_cols
+
+
+def is_blank_upload_value(value: object) -> bool:
+    return pd.isna(value) or str(value).strip() in {"", "-"}
+
+
+def parse_nim_upload_value(value: object) -> str:
+    if is_blank_upload_value(value):
+        raise ValueError("NIM kosong")
+    nim_text = str(value).strip()
+    if nim_text.endswith(".0"):
+        nim_text = nim_text[:-2]
+    nim_text = re.sub(r"\s+", "", nim_text)
+    if not re.fullmatch(r"\d{10}", nim_text):
+        raise ValueError("NIM harus tepat 10 angka")
+    return nim_text
+
+
+def parse_required_text_upload_value(value: object, label: str) -> str:
+    if is_blank_upload_value(value):
+        raise ValueError(f"{label} kosong")
+    text = " ".join(str(value).strip().split())
+    if not text:
+        raise ValueError(f"{label} kosong")
+    return text
+
+
+def parse_ipk_upload_value(value: object) -> float:
+    if is_blank_upload_value(value):
+        raise ValueError("IPK kosong")
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        ipk_value = float(value)
+        if not 0 <= ipk_value <= 4:
+            raise ValueError("IPK harus berada pada rentang 0 sampai 4")
+        return round(ipk_value, 2)
+    ipk_value, ipk_error = parse_ipk_input(str(value))
+    if ipk_error:
+        raise ValueError(ipk_error)
+    return float(ipk_value)
+
+
+def parse_lama_studi_upload_value(value: object) -> int:
+    if is_blank_upload_value(value):
+        raise ValueError("Lama Studi kosong")
+    try:
+        months = int(float(str(value).strip().replace(",", ".")))
+    except ValueError as exc:
+        raise ValueError("Lama Studi harus berupa angka bulan") from exc
+    if months <= 0 or months > 180:
+        raise ValueError("Lama Studi harus berada pada rentang 1 sampai 180 bulan")
+    return months
+
+
+def normalize_periode_wisuda_upload_value(value: object) -> str:
+    if is_blank_upload_value(value):
+        raise ValueError("Periode Wisuda kosong")
+    text = re.sub(r"\s+", " ", str(value).strip().upper())
+    text = text.replace("WISUDA KE-", "WISUDA ").replace("WISUDA KE", "WISUDA ")
+    if text.startswith("WISUDA"):
+        suffix = text.replace("WISUDA", "", 1).strip()
+    else:
+        suffix = text
+
+    roman_or_number = {
+        "1": "I",
+        "I": "I",
+        "2": "II",
+        "II": "II",
+        "3": "III",
+        "III": "III",
+        "4": "IV",
+        "IV": "IV",
+        "5": "V",
+        "V": "V",
+        "6": "VI",
+        "VI": "VI",
+    }.get(suffix, suffix)
+    periode = f"WISUDA {roman_or_number}".strip()
+    if periode not in PERIODE_ORDER:
+        raise ValueError("Periode Wisuda harus WISUDA I sampai WISUDA VI")
+    return periode
+
+
+def parse_tahun_wisuda_upload_value(value: object) -> int:
+    if is_blank_upload_value(value):
+        raise ValueError("Tahun Wisuda kosong")
+    try:
+        year = int(float(str(value).strip()))
+    except ValueError as exc:
+        raise ValueError("Tahun Wisuda harus berupa 4 angka") from exc
+    if not 1900 <= year <= 2100:
+        raise ValueError("Tahun Wisuda harus berada pada rentang 1900 sampai 2100")
+    return year
+
+
+def parse_tanggal_lulus_upload_value(value: object) -> str:
+    if is_blank_upload_value(value):
+        raise ValueError("Tanggal Lulus kosong")
+    parsed = parse_tanggal_lulus(value)
+    if pd.isna(parsed):
+        raise ValueError("Tanggal Lulus tidak valid. Gunakan format YYYY-MM-DD")
+    return parsed.strftime("%Y-%m-%d")
+
+
+def optional_upload_text(value: object) -> str | None:
+    if is_blank_upload_value(value):
+        return None
+    return " ".join(str(value).strip().split())
+
+
+def parse_tendik_upload_rows(uploaded_df: pd.DataFrame) -> tuple[list[dict], list[str], dict[str, object], int]:
+    mapped_cols = map_tendik_upload_columns(uploaded_df.columns)
+    missing = [key for key in TENDIK_REQUIRED_KEYS if key not in mapped_cols]
+    if missing:
+        missing_labels = [TENDIK_FIELD_LABELS[key] for key in missing]
+        return [], [f"Kolom wajib belum ditemukan: {', '.join(missing_labels)}"], mapped_cols, 0
+
+    parsed_records: list[dict] = []
+    error_rows: list[str] = []
+    skipped_rows = 0
+
+    for r_idx in range(len(uploaded_df)):
+        values_in_row = [uploaded_df[col].iloc[r_idx] for col in mapped_cols.values()]
+        if all(is_blank_upload_value(value) for value in values_in_row):
+            skipped_rows += 1
+            continue
+
+        try:
+            rec = {
+                "nim": parse_nim_upload_value(uploaded_df[mapped_cols["nim"]].iloc[r_idx]),
+                "nama": parse_required_text_upload_value(uploaded_df[mapped_cols["nama"]].iloc[r_idx], "Nama"),
+                "judul_ta": parse_required_text_upload_value(uploaded_df[mapped_cols["judul_ta"]].iloc[r_idx], "Judul Tugas Akhir"),
+                "tanggal_lulus": parse_tanggal_lulus_upload_value(uploaded_df[mapped_cols["tanggal_lulus"]].iloc[r_idx]),
+                "ipk": parse_ipk_upload_value(uploaded_df[mapped_cols["ipk"]].iloc[r_idx]),
+                "lama_studi": parse_lama_studi_upload_value(uploaded_df[mapped_cols["lama_studi"]].iloc[r_idx]),
+                "periode_wisuda": normalize_periode_wisuda_upload_value(uploaded_df[mapped_cols["periode_wisuda"]].iloc[r_idx]),
+                "tahun_wisuda": parse_tahun_wisuda_upload_value(uploaded_df[mapped_cols["tahun_wisuda"]].iloc[r_idx]),
+                "pembimbing_1": optional_upload_text(uploaded_df[mapped_cols["pembimbing_1"]].iloc[r_idx]) if "pembimbing_1" in mapped_cols else None,
+                "pembimbing_2": optional_upload_text(uploaded_df[mapped_cols["pembimbing_2"]].iloc[r_idx]) if "pembimbing_2" in mapped_cols else None,
+                "penguji_1": optional_upload_text(uploaded_df[mapped_cols["penguji_1"]].iloc[r_idx]) if "penguji_1" in mapped_cols else None,
+                "penguji_2": optional_upload_text(uploaded_df[mapped_cols["penguji_2"]].iloc[r_idx]) if "penguji_2" in mapped_cols else None,
+                "penguji_3": optional_upload_text(uploaded_df[mapped_cols["penguji_3"]].iloc[r_idx]) if "penguji_3" in mapped_cols else None,
+            }
+            parsed_records.append(rec)
+        except Exception as row_err:
+            error_rows.append(f"Baris {r_idx + 2}: {row_err}")
+
+    return parsed_records, error_rows, mapped_cols, skipped_rows
+
+
+@st.cache_data(show_spinner=False)
+def build_tendik_excel_template(lecturer_options: tuple[str, ...] = ()) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.comments import Comment
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data Alumni"
+
+    headers = [field["label"] for field in TENDIK_UPLOAD_FIELDS]
+    examples = [field["example"] for field in TENDIK_UPLOAD_FIELDS]
+    ws.append(headers)
+    ws.append(examples)
+    ws["D2"] = datetime.date(2026, 3, 14)
+
+    header_fill_required = PatternFill("solid", fgColor="1F644E")
+    header_fill_optional = PatternFill("solid", fgColor="6B7F76")
+    header_font = Font(color="FFFFFF", bold=True)
+    thin_border = Border(bottom=Side(style="thin", color="B4C5BE"))
+
+    for idx, field in enumerate(TENDIK_UPLOAD_FIELDS, start=1):
+        cell = ws.cell(row=1, column=idx)
+        cell.fill = header_fill_required if field["required"] else header_fill_optional
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+        cell.comment = Comment(field["note"], "Lensa DSI")
+        ws.column_dimensions[cell.column_letter].width = max(16, min(38, len(field["label"]) + 8))
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{ws.cell(row=1, column=len(headers)).coordinate}"
+
+    for row in ws.iter_rows(min_row=2, max_row=501, min_col=1, max_col=len(headers)):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        row[0].number_format = "@"
+        row[3].number_format = "yyyy-mm-dd"
+        row[4].number_format = "0.00"
+        row[5].number_format = "0"
+        row[7].number_format = "0"
+
+    ref = wb.create_sheet("Referensi")
+    ref.append(["Periode Wisuda", "Dosen"])
+    for row_idx, periode in enumerate(PERIODE_ORDER.keys(), start=2):
+        ref.cell(row=row_idx, column=1, value=periode)
+    for row_idx, lecturer in enumerate(lecturer_options, start=2):
+        ref.cell(row=row_idx, column=2, value=lecturer)
+    ref.column_dimensions["A"].width = 18
+    ref.column_dimensions["B"].width = 40
+    for cell in ref[1]:
+        cell.fill = header_fill_required
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    ref.sheet_state = "hidden"
+
+    periode_last_row = len(PERIODE_ORDER) + 1
+    lecturer_last_row = max(len(lecturer_options) + 1, 2)
+    lecturer_formula = f"'Referensi'!$B$2:$B${lecturer_last_row}"
+    validations = [
+        ("D2:D501", DataValidation(type="date", operator="between", formula1="DATE(1900,1,1)", formula2="DATE(2100,12,31)", allow_blank=False)),
+        ("E2:E501", DataValidation(type="decimal", operator="between", formula1="0", formula2="4", allow_blank=False)),
+        ("F2:F501", DataValidation(type="whole", operator="between", formula1="1", formula2="180", allow_blank=False)),
+        ("G2:G501", DataValidation(type="list", formula1=f"'Referensi'!$A$2:$A${periode_last_row}", allow_blank=False)),
+        ("H2:H501", DataValidation(type="whole", operator="between", formula1="1900", formula2="2100", allow_blank=False)),
+    ]
+    if lecturer_options:
+        validations.extend(
+            [
+                (f"{column}2:{column}501", DataValidation(type="list", formula1=lecturer_formula, allow_blank=True))
+                for column in ["I", "J", "K", "L", "M"]
+            ]
+        )
+    for range_ref, validation in validations:
+        ws.add_data_validation(validation)
+        validation.add(range_ref)
+
+    guide = wb.create_sheet("Panduan Kolom")
+    guide.append(["Kolom", "Wajib?", "Contoh", "Catatan"])
+    for field in TENDIK_UPLOAD_FIELDS:
+        guide.append([
+            field["label"],
+            "Ya" if field["required"] else "Tidak",
+            field["example"],
+            field["note"],
+        ])
+    for cell in guide[1]:
+        cell.fill = header_fill_required
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    guide.column_dimensions["A"].width = 24
+    guide.column_dimensions["B"].width = 10
+    guide.column_dimensions["C"].width = 34
+    guide.column_dimensions["D"].width = 70
+    for row in guide.iter_rows(min_row=2, max_row=guide.max_row, min_col=1, max_col=4):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
 
 
 def predikat_ipk(ipk: float) -> str:
@@ -3942,21 +4359,36 @@ def main() -> None:
             st.session_state.tendik_preview_records = []
             
         with tab_excel:
+            lecturer_options = tuple(get_lecturer_options(schema.dim_dosen))
             st.markdown("### Unggah Data Berkas Excel / CSV")
             st.markdown(
                 """
-                Pastikan berkas Excel (.xlsx, .xls) atau CSV (.csv) yang diunggah memiliki kolom dengan format berikut:
-                `NIM`, `Nama`, `Judul Tugas Akhir`, `Tanggal Lulus` (YYYY-MM-DD), `IPK`, `Lama Studi` (bulan), 
-                `Periode Wisuda` (WISUDA I s.d V), `Tahun Wisuda`, `Pembimbing 1`, `Pembimbing 2`, `Dosen Penguji 1`, `Dosen Penguji 2`, `Dosen Penguji 3`.
+                Unduh template terlebih dahulu agar nama kolom dan format data sesuai.
+                Kolom wajib: `NIM`, `Nama`, `Judul Tugas Akhir`, `Tanggal Lulus`, `IPK`, `Lama Studi`,
+                `Periode Wisuda`, dan `Tahun Wisuda`. Kolom dosen bersifat opsional.
                 """
             )
+            try:
+                st.download_button(
+                    "Unduh Template Excel",
+                    data=build_tendik_excel_template(lecturer_options),
+                    file_name="template_upload_alumni_tendik.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+            except ImportError:
+                st.warning("Template Excel membutuhkan dependency `openpyxl`. Jalankan `pip install -r requirements.txt`, lalu buka ulang aplikasi.")
+
             excel_file = st.file_uploader("Pilih berkas Excel atau CSV", type=["xlsx", "xls", "csv"])
             if excel_file is not None:
                 try:
-                    if excel_file.name.endswith(".csv"):
-                        uploaded_df = pd.read_csv(excel_file)
+                    file_name = excel_file.name.lower()
+                    if file_name.endswith(".csv"):
+                        uploaded_df = pd.read_csv(excel_file, dtype=object)
                     else:
-                        uploaded_df = pd.read_excel(excel_file)
+                        uploaded_df = pd.read_excel(excel_file, sheet_name=0, dtype=object)
+                    if uploaded_df.empty:
+                        raise ValueError("Berkas tidak memiliki data untuk diimpor.")
                         
                     # Normalize columns and map them
                     def normalize_header(h: str) -> str:
@@ -3964,12 +4396,12 @@ def main() -> None:
                         h = re.sub(r'[\s_\-\(\)]+', '', h)
                         return h
 
-                    mapped_cols = {}
+                    mapped_cols = map_tendik_upload_columns(uploaded_df.columns)
                     for col in uploaded_df.columns:
                         norm = normalize_header(col)
                         if "nim" in norm:
                             mapped_cols["nim"] = col
-                        elif "nama" in norm:
+                        elif norm in {"nama", "namalengkap", "namamahasiswa"}:
                             mapped_cols["nama"] = col
                         elif "judul" in norm:
                             mapped_cols["judul_ta"] = col
@@ -3994,18 +4426,32 @@ def main() -> None:
                         elif "penguji3" in norm or ("penguji" in norm and "3" in norm):
                             mapped_cols["penguji_3"] = col
 
-                    required = ["nim", "nama", "judul_ta", "tanggal_lulus", "ipk", "lama_studi", "periode_wisuda", "tahun_wisuda"]
+                    required = TENDIK_REQUIRED_KEYS
                     missing = [r for r in required if r not in mapped_cols]
                     
                     if missing:
-                        st.error(f"Berkas kekurangan atau tidak mengenali kolom wajib: {', '.join(missing)}")
+                        missing_labels = [TENDIK_FIELD_LABELS.get(key, key) for key in missing]
+                        st.error(f"Berkas kekurangan atau tidak mengenali kolom wajib: {', '.join(missing_labels)}")
                     else:
+                        mapped_summary = pd.DataFrame(
+                            [
+                                {"Kolom Sistem": TENDIK_FIELD_LABELS.get(key, key), "Kolom Berkas": str(source_col)}
+                                for key, source_col in mapped_cols.items()
+                            ]
+                        )
+                        with st.expander("Lihat pemetaan kolom yang terbaca", expanded=False):
+                            st.dataframe(mapped_summary, use_container_width=True, hide_index=True)
+
                         parsed_records = []
                         error_rows = []
                         num_rows = len(uploaded_df)
                         
                         for r_idx in range(num_rows):
                             try:
+                                row_values = [uploaded_df[col].iloc[r_idx] for col in mapped_cols.values()]
+                                if all(is_blank_upload_value(value) for value in row_values):
+                                    continue
+
                                 # Parse NIM
                                 raw_nim = uploaded_df[mapped_cols["nim"]].iloc[r_idx]
                                 if pd.isna(raw_nim):
@@ -4013,6 +4459,7 @@ def main() -> None:
                                 nim_str = str(raw_nim).strip()
                                 if nim_str.endswith(".0"):
                                     nim_str = nim_str[:-2]
+                                nim_str = parse_nim_upload_value(nim_str)
                                 
                                 # Parse Nama
                                 raw_nama = uploaded_df[mapped_cols["nama"]].iloc[r_idx]
@@ -4028,30 +4475,19 @@ def main() -> None:
                                 
                                 # Parse Tanggal Lulus
                                 raw_tgl = uploaded_df[mapped_cols["tanggal_lulus"]].iloc[r_idx]
-                                if pd.isna(raw_tgl):
-                                    raise ValueError("Tanggal lulus kosong")
-                                tgl_parsed = pd.to_datetime(raw_tgl)
-                                tgl_str = tgl_parsed.strftime("%Y-%m-%d")
+                                tgl_str = parse_tanggal_lulus_upload_value(raw_tgl)
                                 
                                 # Parse IPK
                                 raw_ipk = uploaded_df[mapped_cols["ipk"]].iloc[r_idx]
-                                if pd.isna(raw_ipk):
-                                    raise ValueError("IPK kosong")
-                                ipk_val = float(raw_ipk)
-                                if not (0.0 <= ipk_val <= 4.0):
-                                    raise ValueError(f"IPK {ipk_val} di luar rentang 0-4")
+                                ipk_val = parse_ipk_upload_value(raw_ipk)
                                     
                                 # Parse Lama Studi
                                 raw_studi = uploaded_df[mapped_cols["lama_studi"]].iloc[r_idx]
-                                if pd.isna(raw_studi):
-                                    raise ValueError("Lama studi kosong")
-                                studi_val = int(float(raw_studi))
+                                studi_val = parse_lama_studi_upload_value(raw_studi)
                                 
                                 # Parse Periode Wisuda
                                 raw_periode = uploaded_df[mapped_cols["periode_wisuda"]].iloc[r_idx]
-                                if pd.isna(raw_periode):
-                                    raise ValueError("Periode wisuda kosong")
-                                periode_str = str(raw_periode).strip().upper()
+                                periode_str = normalize_periode_wisuda_upload_value(raw_periode)
                                 # Normalize Roman numerals
                                 if not periode_str.startswith("WISUDA "):
                                     norm_p = periode_str.replace("WISUDA", "").strip()
@@ -4070,9 +4506,7 @@ def main() -> None:
                                 
                                 # Parse Tahun Wisuda
                                 raw_tahun = uploaded_df[mapped_cols["tahun_wisuda"]].iloc[r_idx]
-                                if pd.isna(raw_tahun):
-                                    raise ValueError("Tahun wisuda kosong")
-                                tahun_val = int(float(raw_tahun))
+                                tahun_val = parse_tahun_wisuda_upload_value(raw_tahun)
                                 
                                 # Optional fields
                                 p1 = uploaded_df[mapped_cols["pembimbing_1"]].iloc[r_idx] if "pembimbing_1" in mapped_cols else None
@@ -4105,10 +4539,14 @@ def main() -> None:
                                 st.write("\n".join(error_rows))
                                 
                         if parsed_records:
+                            st.success(f"{len(parsed_records)} baris valid siap ditambahkan ke preview.")
+                            st.dataframe(pd.DataFrame(parsed_records).head(20), use_container_width=True, hide_index=True)
                             if st.button("Tambahkan Data Berkas ke Preview", key="btn_add_excel_to_preview", use_container_width=True):
                                 st.session_state.tendik_preview_records.extend(parsed_records)
                                 st.success(f"{len(parsed_records)} data berhasil ditambahkan ke preview!")
                                 st.rerun()
+                        elif not error_rows:
+                            st.info("Tidak ada baris data yang dapat diproses dari berkas tersebut.")
                 except Exception as e:
                     st.error(f"Gagal membaca berkas: {e}")
                     

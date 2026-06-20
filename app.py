@@ -27,6 +27,7 @@ APP_DIR = Path(__file__).resolve().parent
 DATA_PATH = APP_DIR / "data" / "riwayatalumniDSI_clean_final.csv"
 FALLBACK_DOWNLOADS_PATH = Path.home() / "Downloads" / "riwayatalumniDSI_clean_final (8).csv"
 DEFAULT_DB_URL = "postgresql://postgres:password@127.0.0.1:5432/bi_alumni_dsi"
+SBERT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
 PERIODE_ORDER = {
     "WISUDA I": 1,
@@ -2035,7 +2036,7 @@ def render_database_setup(error: Exception) -> None:
     st.error("Dashboard belum bisa membaca PostgreSQL star schema.")
     st.markdown(
         f"""
-        App ini sekarang mengikuti alur BI final: CSV bersih dan hasil NLP SBERT dimuat dulu ke PostgreSQL star schema,
+        App ini sekarang mengikuti alur BI final: CSV bersih dan atribut similarity dimuat ke PostgreSQL star schema,
         lalu dashboard membaca dari database.
 
         **Koneksi yang dicoba**
@@ -2050,7 +2051,7 @@ def render_database_setup(error: Exception) -> None:
         # 2. Set connection string bila user/password berbeda
         $env:BI_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/bi_alumni_dsi"
 
-        # 3. Load CSV + NLP SBERT + star schema
+        # 3. Load CSV + star schema
         .\\.venv\\Scripts\\python.exe scripts\\load_star_schema.py
 
         # 4. Jalankan dashboard
@@ -2561,7 +2562,7 @@ def build_nlp_insights(
     if scored_df.empty:
         return (
             [f"Data tugas akhir tersedia, tetapi skor kemiripan belum dihitung pada filter ini."],
-            ["Sinkronkan ulang database NLP (jalankan load_star_schema.py) agar skor similarity tersedia."],
+            ["Tambahkan atau simpan ulang data melalui laman Tendik agar skor similarity dihitung ulang."],
         )
 
     total_ta = len(scored_df)
@@ -2651,8 +2652,8 @@ def build_nlp_insights(
                           "dalam instrumen akreditasi untuk menunjukkan keluasan cakupan "
                           "dan keberagaman payung penelitian yang dikelola departemen.")
     else:
-        vis10_insight = "Koordinat PCA belum tersedia. Diperlukan proses komputasi ulang skrip NLP untuk menghasilkan representasi vektor semantik."
-        vis10_reco = "Lakukan sinkronisasi basis data NLP agar visualisasi peta klaster judul tugas akhir dapat ditampilkan dengan akurat."
+        vis10_insight = "Koordinat PCA belum tersedia. Diperlukan proses komputasi ulang similarity untuk menghasilkan representasi vektor judul."
+        vis10_reco = "Simpan data melalui laman Tendik agar similarity dan visualisasi peta klaster judul tugas akhir dihitung ulang."
 
     # --- Vis 11: Kata kunci dominan ---
     is_hightech = any(
@@ -3659,7 +3660,7 @@ def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
                 </div>
                 <div>
                     <div class="kpi-card-value">{avg_similarity * 100:.1f}%</div>
-                    <div class="kpi-card-subtext">Skor Cosine SBERT</div>
+                    <div class="kpi-card-subtext">Skor cosine SBERT antar judul</div>
                 </div>
             </div>
             """,
@@ -3744,7 +3745,7 @@ def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
                 x="skor_kemiripan_tertinggi",
                 nbins=30,
                 color="kategori_keunikan",
-                title="Distribusi Skor SBERT Cosine Similarity Tertinggi",
+                title="Distribusi Skor Cosine Similarity Tertinggi",
                 labels={"skor_kemiripan_tertinggi": "Skor Cosine Similarity", "count": "Jumlah Judul"},
                 color_discrete_map={
                     "Unik": "#114b36",
@@ -3797,7 +3798,7 @@ def nlp_dashboard(df: pd.DataFrame, target_months: int) -> None:
                     y="pca_y",
                     color="kategori_keunikan",
                     hover_data=["Nama", "Judul Tugas Akhir", "skor_kemiripan_tertinggi", "judul_termirip"],
-                    title="Peta Kedekatan Judul TA dari Koordinat PCA SBERT",
+                    title="Peta Kedekatan Judul TA dari Koordinat PCA",
                     color_discrete_map={
                         "Unik": "#114b36",
                         "Agak Unik / Perlu Review": "#b87333",
@@ -3963,6 +3964,132 @@ def get_next_key(cur, table, key_column):
     return cur.fetchone()[0]
 
 
+@st.cache_resource(show_spinner=False)
+def get_sbert_model():
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(SBERT_MODEL_NAME)
+
+
+def compute_title_similarity_metrics(title_df: pd.DataFrame) -> pd.DataFrame:
+    result_columns = ["ta_key", "skor_kemiripan_tertinggi", "kategori_keunikan", "ta_key_termirip", "pca_x", "pca_y"]
+    if title_df.empty:
+        return pd.DataFrame(columns=result_columns)
+
+    from sklearn.decomposition import PCA
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    working = title_df.copy()
+    working["ta_key"] = pd.to_numeric(working["ta_key"], errors="coerce").astype(int)
+    texts = (
+        working["judul_final"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    fallback_texts = (
+        working["judul_preprocessed"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    original_texts = (
+        working["judul_tugas_akhir"]
+        .fillna("")
+        .astype(str)
+        .map(final_title)
+    )
+    texts = texts.mask(texts.eq(""), fallback_texts)
+    texts = texts.mask(texts.eq(""), original_texts)
+    texts = texts.mask(texts.eq(""), "judul kosong")
+
+    if len(working) == 1:
+        return pd.DataFrame(
+            [
+                {
+                    "ta_key": int(working["ta_key"].iloc[0]),
+                    "skor_kemiripan_tertinggi": 0.0,
+                    "kategori_keunikan": uniqueness_category(0.0),
+                    "ta_key_termirip": None,
+                    "pca_x": 0.0,
+                    "pca_y": 0.0,
+                }
+            ],
+            columns=result_columns,
+        )
+
+    model = get_sbert_model()
+    embeddings = model.encode(
+        texts.tolist(),
+        batch_size=32,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )
+    similarity_matrix = cosine_similarity(embeddings)
+    np.fill_diagonal(similarity_matrix, -1.0)
+
+    best_indices = similarity_matrix.argmax(axis=1)
+    best_scores = similarity_matrix[np.arange(len(working)), best_indices]
+    best_scores = np.clip(best_scores, 0.0, 1.0)
+    ta_keys = working["ta_key"].to_numpy()
+
+    coords = np.zeros((len(working), 2), dtype=float)
+    if len(working) >= 2 and embeddings.shape[1] >= 2:
+        n_components = min(2, len(working), embeddings.shape[1])
+        transformed = PCA(n_components=n_components, random_state=42).fit_transform(embeddings)
+        coords[:, :n_components] = transformed[:, :n_components]
+
+    metrics = pd.DataFrame(
+        {
+            "ta_key": ta_keys.astype(int),
+            "skor_kemiripan_tertinggi": best_scores.astype(float),
+            "kategori_keunikan": [uniqueness_category(float(score)) for score in best_scores],
+            "ta_key_termirip": ta_keys[best_indices].astype(int),
+            "pca_x": coords[:, 0].astype(float),
+            "pca_y": coords[:, 1].astype(float),
+        }
+    )
+    return metrics[result_columns]
+
+
+def recompute_title_similarity_in_db(cur) -> int:
+    cur.execute(
+        """
+        SELECT ta_key, judul_tugas_akhir, judul_preprocessed, judul_final
+        FROM dim_tugas_akhir
+        ORDER BY ta_key
+        """
+    )
+    rows = cur.fetchall()
+    columns = [description.name for description in cur.description]
+    title_df = pd.DataFrame(rows, columns=columns)
+    metrics = compute_title_similarity_metrics(title_df)
+
+    for row in metrics.to_dict("records"):
+        cur.execute(
+            """
+            UPDATE dim_tugas_akhir
+            SET
+                skor_kemiripan_tertinggi = %s,
+                kategori_keunikan = %s,
+                ta_key_termirip = %s,
+                pca_x = %s,
+                pca_y = %s
+            WHERE ta_key = %s
+            """,
+            (
+                round(float(row["skor_kemiripan_tertinggi"]), 6),
+                row["kategori_keunikan"],
+                int(row["ta_key_termirip"]) if pd.notna(row["ta_key_termirip"]) else None,
+                round(float(row["pca_x"]), 8),
+                round(float(row["pca_y"]), 8),
+                int(row["ta_key"]),
+            ),
+        )
+    return len(metrics)
+
+
 def save_records_to_db(records_list: list[dict]) -> tuple[bool, str]:
     db_url = get_database_url()
     try:
@@ -4094,8 +4221,9 @@ def save_records_to_db(records_list: list[dict]) -> tuple[bool, str]:
                             "INSERT INTO bridge_peran_dosen (peran_dosen_key, kelulusan_key, dosen_key, jenis_peran, urutan_peran, role_count) VALUES (%s, %s, %s, %s, %s, %s)",
                             (peran_key, kelulusan_key, dosen_key, jenis_peran, urutan_peran, 1)
                         )
+                recomputed_count = recompute_title_similarity_in_db(cur)
             conn.commit()
-        return True, "Data berhasil disimpan ke database!"
+        return True, f"Data berhasil disimpan ke database! Similarity {recomputed_count} judul tugas akhir juga sudah dihitung ulang."
     except Exception as e:
         return False, str(e)
 
@@ -4621,7 +4749,7 @@ def main() -> None:
                     st.rerun()
             with col_act2:
                 if st.button("💾 Simpan Permanen ke Database PostgreSQL", key="btn_save_to_db", use_container_width=True):
-                    with st.spinner("Menyimpan ke PostgreSQL..."):
+                    with st.spinner("Menyimpan ke PostgreSQL dan menghitung ulang similarity judul TA..."):
                         success, message = save_records_to_db(st.session_state.tendik_preview_records)
                         if success:
                             st.success(message)

@@ -1945,7 +1945,13 @@ def get_data_path() -> Path:
 
 
 def get_database_url() -> str:
+    try:
+        if hasattr(st, "secrets") and "BI_DATABASE_URL" in st.secrets:
+            return st.secrets["BI_DATABASE_URL"]
+    except Exception:
+        pass
     return os.getenv("BI_DATABASE_URL", DEFAULT_DB_URL)
+
 
 
 def fetch_dataframe(query: str) -> pd.DataFrame:
@@ -4109,7 +4115,11 @@ def save_records_to_db(records_list: list[dict]) -> tuple[bool, str]:
                         )
                     
                     # 2. Check or insert dim_waktu
-                    tanggal_lulus = pd.to_datetime(r["tanggal_lulus"]).date()
+                    parsed_dt = parse_tanggal_lulus(r["tanggal_lulus"])
+                    if pd.isna(parsed_dt):
+                        tanggal_lulus = datetime.date(int(r.get("tahun_wisuda", 2000)), 1, 1)
+                    else:
+                        tanggal_lulus = parsed_dt.date()
                     cur.execute("SELECT waktu_key FROM dim_waktu WHERE tanggal_lulus = %s", (tanggal_lulus,))
                     row = cur.fetchone()
                     if row:
@@ -4333,7 +4343,7 @@ def main() -> None:
             """,
             unsafe_allow_html=True
         )
-        if st.button("🔄 Sync Data", key="sync_data_btn", use_container_width=True):
+        if st.button("Sync Data", icon=":material/sync:", key="sync_data_btn", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -4345,16 +4355,24 @@ def main() -> None:
     style_lines = []
 
     st.sidebar.markdown(
-        '<div style="font-family: \'Outfit\', sans-serif; font-size: 0.85rem; font-weight: 700; color: #5e6b66; margin-bottom: 8px; margin-top: 10px;">NAVIGASI</div>',
+        """
+        <div style="font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 700; color: #5e6b66; margin-bottom: 8px; margin-top: 10px; display: flex; align-items: center; gap: 6px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+            NAVIGASI
+        </div>
+        """,
         unsafe_allow_html=True
     )
     col_nav1, col_nav2 = st.sidebar.columns(2)
     with col_nav1:
-        if st.button("📊 Dashboard", key="btn_nav_dash", use_container_width=True):
+        if st.button("Dashboard", icon=":material/space_dashboard:", key="btn_nav_dash", use_container_width=True):
             st.session_state.page = "Dashboard"
             st.rerun()
     with col_nav2:
-        if st.button("👤 Tendik", key="btn_nav_tendik", use_container_width=True):
+        if st.button("Tendik", icon=":material/badge:", key="btn_nav_tendik", use_container_width=True):
             st.session_state.page = "Tendik"
             st.rerun()
 
@@ -4404,7 +4422,21 @@ def main() -> None:
 
     if st.session_state.page == "Dashboard":
         # Render Filters
-        st.sidebar.markdown('<div class="filter-title">Filter Dashboard</div>', unsafe_allow_html=True)
+        st.sidebar.markdown(
+            """
+            <div class="filter-title" style="display: flex; align-items: center; gap: 8px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>
+                    <line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>
+                    <line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line>
+                    <line x1="17" y1="16" x2="23" y2="16"></line>
+                </svg>
+                Filter Dashboard
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
         
         min_year = int(df["Tahun Wisuda"].min())
         max_year = int(df["Tahun Wisuda"].max())
@@ -4744,11 +4776,11 @@ def main() -> None:
             
             col_act1, col_act2 = st.columns([1, 4])
             with col_act1:
-                if st.button("🗑️ Hapus Semua Preview", key="btn_clear_preview", use_container_width=True):
+                if st.button("Hapus Semua Preview", icon=":material/delete_sweep:", key="btn_clear_preview", use_container_width=True):
                     st.session_state.tendik_preview_records = []
                     st.rerun()
             with col_act2:
-                if st.button("💾 Simpan Permanen ke Database PostgreSQL", key="btn_save_to_db", use_container_width=True):
+                if st.button("Simpan Permanen ke Database PostgreSQL", icon=":material/cloud_upload:", key="btn_save_to_db", use_container_width=True):
                     with st.spinner("Menyimpan ke PostgreSQL dan menghitung ulang similarity judul TA..."):
                         success, message = save_records_to_db(st.session_state.tendik_preview_records)
                         if success:
